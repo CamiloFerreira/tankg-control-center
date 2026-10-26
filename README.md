@@ -21,6 +21,23 @@ packaging/install-linux.sh                 # Linux: copia a ~/.local/bin y añad
 Una etiqueta `vX.Y.Z` subida a GitHub compila ambos y publica el release
 (`.github/workflows/release.yml`).
 
+### Firma y verificación
+
+Cada release incluye `SHA256SUMS` (comprobar con `sha256sum -c SHA256SUMS --ignore-missing`) y el
+`.exe` va firmado con un certificado autofirmado (`packaging/tankg-codesign.cer`, huella SHA-256
+`A3:45:7F:B8:…:0F:0A:91`). Para que tu Windows lo reconozca, en PowerShell **como administrador**:
+
+```powershell
+Import-Certificate -FilePath .\tankg-codesign.cer -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath .\tankg-codesign.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+```
+
+Ojo: instalar el certificado como raíz de confianza hace que Windows confíe en cualquier programa
+firmado con su clave privada; hazlo solo en tus equipos y guarda la clave
+(`~/.local/share/tankg-signing/`) en lugar seguro. Se quita con `certlm.msc`.
+La firma en CI usa los secretos `WINDOWS_PFX_BASE64` y `WINDOWS_PFX_PASSWORD`; sin ellos el
+release sale sin firmar.
+
 ## Windows (desde el código)
 
 1. Instala Python 3.11+ desde https://www.python.org/downloads/ marcando **Add python.exe to PATH**.

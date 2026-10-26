@@ -34,6 +34,24 @@ jobs:
       - run: python packaging/build.py
       - name: Smoke test (CLI help)
         run: ${{ matrix.binary }} list --help
+      - name: Sign (Windows, self-signed certificate)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          if (-not $env:PFX_BASE64) { Write-Host "No signing secrets: publishing unsigned"; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64))
+          $flags = [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+          $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx, $env:PFX_PASSWORD, $flags)
+          $sig = Set-AuthenticodeSignature -FilePath "${{ matrix.binary }}" -Certificate $cert `
+                   -HashAlgorithm SHA256 -TimestampServer "http://timestamp.digicert.com"
+          Remove-Item $pfx
+          # Self-signed: status is "UnknownError" (untrusted root) but the signature is present.
+          if (-not $sig.SignerCertificate) { throw "Signing failed: $($sig.StatusMessage)" }
+          Write-Host "Signed by $($sig.SignerCertificate.Subject), thumbprint $($sig.SignerCertificate.Thumbprint)"
       - name: Rename
         shell: bash
         run: mv "${{ matrix.binary }}" "${{ matrix.asset }}"
@@ -57,6 +75,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           chmod +x assets/TankG-linux-x86_64
+          cp packaging/tankg-codesign.cer assets/
+          (cd assets && sha256sum TankG-* tankg-codesign.cer > SHA256SUMS && cat SHA256SUMS)
           gh release create "$GITHUB_REF_NAME" assets/* \
             --title "Tank-G Control Center $GITHUB_REF_NAME" \
             --notes-file packaging/RELEASE_NOTES.md
