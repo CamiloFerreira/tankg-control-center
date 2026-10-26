@@ -1,8 +1,22 @@
 # Tank-G Control Center
 
-Gestor de presets para la pedalera **M-VAVE Tank-G** en Linux. Habla el protocolo SysEx del
-editor oficial M-EFCS directamente sobre ALSA rawmidi (`/dev/snd/midiC*D0`): no necesita
-drivers, Wine ni dependencias MIDI.
+Gestor de presets para la pedalera **M-VAVE Tank-G** en **Linux y Windows**. Habla el protocolo
+SysEx del editor oficial M-EFCS directamente por USB-MIDI (la pedalera es class-compliant: no
+necesita drivers).
+
+- Linux: ALSA rawmidi (`/dev/snd/midiC*D0`), sin dependencias MIDI.
+- Windows / macOS: `python-rtmidi` (se instala solo).
+
+## Windows
+
+1. Instala Python 3.11+ desde https://www.python.org/downloads/ marcando **Add python.exe to PATH**.
+2. Descarga el proyecto (Code → Download ZIP, o `git clone`).
+3. Conecta la Tank-G por USB y **cierra M-EFCS**: en Windows el puerto MIDI solo lo puede usar
+   un programa a la vez.
+4. Doble clic en `run.bat` (la primera vez crea el entorno e instala dependencias, tarda un poco).
+   Para la línea de comandos: `run.bat list`, `run.bat backup`, etc.
+
+Datos (backups y nombres) en `%APPDATA%\tankg\`.
 
 ## Uso
 
@@ -21,7 +35,8 @@ drivers, Wine ni dependencias MIDI.
 ./run.sh diff archivo.tgbank
 ```
 
-`./run.sh` crea el entorno `.venv` la primera vez. Tests: `.venv/bin/python -m pytest -q`.
+`./run.sh` (Linux) o `run.bat` (Windows) crea el entorno `.venv` la primera vez.
+Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Windows.
 
 ## Interfaz gráfica
 
@@ -36,7 +51,7 @@ drivers, Wine ni dependencias MIDI.
   deshacer, copiar/pegar, intercambiar, restaurar de fábrica, importar/exportar, backup.
 - Nombres (solo en la app, la pedalera no guarda nombres): escribe el nombre del preset junto
   al título (F2); clic en «BANCO n» para nombrar el banco (Shift+F2). Se guardan en
-  `~/.local/share/tankg/aliases.json`, siguen al preset al intercambiar/duplicar y viajan
+  `~/.local/share/tankg/aliases.json` (Windows: `%APPDATA%\tankg\aliases.json`), siguen al preset al intercambiar/duplicar y viajan
   dentro de los `.tgpreset`.
 - «Escucha en vivo»: cada cambio se guarda en la pedalera y se activa el preset para oírlo.
 - La conexión y desconexión se detectan solas. La pedalera solo se abre durante cada

@@ -172,3 +172,40 @@ def test_preset_file_keeps_name(tmp_path):
     p = Bank.from_bytes(LIVE).presets[0]
     path = library.save_preset(p, tmp_path / "x.tgpreset", 0, "Nylon natural")
     assert library.load_preset_file(path) == (p, "Nylon natural")
+
+
+class _FakeRt:
+    """Stands in for python-rtmidi with Windows-style port names."""
+    outs = ["Microsoft GS Wavetable Synth 0", "USB Composite Device 1"]
+    ins = ["USB Composite Device 0"]
+
+    class MidiOut:
+        def get_ports(self):
+            return _FakeRt.outs
+
+        def delete(self):
+            pass
+
+    class MidiIn:
+        def get_ports(self):
+            return _FakeRt.ins
+
+        def delete(self):
+            pass
+
+
+def test_rtmidi_port_matching_windows_names(monkeypatch):
+    from tankg import device
+    monkeypatch.setattr(device, "rtmidi", _FakeRt)
+    devs = device._find_rtmidi()
+    assert len(devs) == 1 and devs[0].out_port == 1 and devs[0].in_port == 0
+
+
+def test_rtmidi_port_matching_alsa_names(monkeypatch):
+    from tankg import device
+    monkeypatch.setattr(_FakeRt, "outs", ["Midi Through:Midi Through Port-0 14:0",
+                                          "USB Composite Device:USB Composite Device MIDI 1 28:0"])
+    monkeypatch.setattr(_FakeRt, "ins", list(_FakeRt.outs))
+    monkeypatch.setattr(device, "rtmidi", _FakeRt)
+    devs = device._find_rtmidi()
+    assert [(d.out_port, d.in_port) for d in devs] == [(1, 1)]

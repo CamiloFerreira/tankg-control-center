@@ -16,7 +16,10 @@ from .model import Bank, Preset, slot_name
 
 PRESET_FORMAT = "tankg-preset"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "tankg"
+if os.name == "nt":
+    DATA_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "tankg"
+else:
+    DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "tankg"
 BACKUP_DIR = DATA_DIR / "backups"
 ALIAS_FILE = DATA_DIR / "aliases.json"
 FACTORY_CANDIDATES = [

@@ -1,4 +1,5 @@
-"""Tank-G over ALSA rawmidi (/dev/snd/midiCxDy). No third-party dependencies.
+"""Tank-G over MIDI: ALSA rawmidi on Linux (no dependencies), python-rtmidi elsewhere
+(Windows WinMM, macOS CoreMIDI) or on Linux when rawmidi is unavailable.
 
 Operations and their status (see research/FINDINGS.md):
   read bank      space 0, field 0, len 758                         verified
@@ -12,8 +13,10 @@ from __future__ import annotations
 import errno
 import glob
 import os
+import queue
 import re
 import select
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,9 +25,15 @@ from . import sysex
 from .model import BANK_LEN, Bank, Preset, REC_LEN, SLOTS
 
 USB_ID = "4c4a:c755"   # generic Jieli id, shared by other M-VAVE pedals
+PORT_NAME = "USB Composite Device"   # MIDI port name of the Jieli chip on every OS
 SPACE_BANK = 0x0
 SPACE_COMMIT = 0xF
 COMMIT_FRAME = sysex.build(sysex.CLS_WRITE, sysex.CMD_READ, 0, 0, SPACE_COMMIT)
+
+try:
+    import rtmidi
+except ImportError:   # optional on Linux
+    rtmidi = None
 
 
 class DeviceError(Exception):
@@ -33,40 +42,126 @@ class DeviceError(Exception):
 
 @dataclass(frozen=True)
 class DeviceInfo:
-    card: int
-    usb_id: str
+    backend: str          # "rawmidi" or "rtmidi"
     name: str
-    rawmidi: str
-    usb_path: str
+    address: str          # rawmidi node, or rtmidi port name
+    out_port: int = -1    # rtmidi port indices
+    in_port: int = -1
 
     def describe(self) -> str:
-        return f"{self.name} [{self.usb_id}] tarjeta ALSA {self.card}, {self.rawmidi}"
+        return f"{self.name} [{self.backend}] {self.address}"
 
 
-def find_devices() -> list[DeviceInfo]:
+def _find_rawmidi() -> list[DeviceInfo]:
     found = []
     for card_dir in sorted(glob.glob("/proc/asound/card[0-9]*")):
         try:
-            usb_id = Path(card_dir, "usbid").read_text().strip()
+            if Path(card_dir, "usbid").read_text().strip() != USB_ID:
+                continue
         except OSError:
-            continue
-        if usb_id != USB_ID:
             continue
         card = int(re.sub(r"\D", "", Path(card_dir).name))
         node = f"/dev/snd/midiC{card}D0"
-        if not os.path.exists(node):
-            continue
-        try:
-            name = Path(card_dir, "id").read_text().strip()
-            usb_path = Path(card_dir, "usbbus").read_text().strip()
-        except OSError:
-            name, usb_path = "?", "?"
-        found.append(DeviceInfo(card, usb_id, name, node, usb_path))
+        if os.path.exists(node):
+            found.append(DeviceInfo("rawmidi", f"{PORT_NAME} (tarjeta ALSA {card})", node))
     return found
 
 
+def _port_key(name: str) -> str:
+    """Port name without the per-OS decoration: Windows appends ' 0'/' 1', ALSA ' 28:0'."""
+    return re.sub(r"\s+\d+(:\d+)?$", "", name).strip()
+
+
+def _find_rtmidi() -> list[DeviceInfo]:
+    if rtmidi is None:
+        return []
+    try:
+        midi_out, midi_in = rtmidi.MidiOut(), rtmidi.MidiIn()
+        outs, ins = midi_out.get_ports(), midi_in.get_ports()
+        midi_out.delete()
+        midi_in.delete()
+    except Exception:  # noqa: BLE001 - a broken MIDI subsystem means "no device"
+        return []
+    found = []
+    used_in: set[int] = set()
+    for oi, oname in enumerate(outs):
+        if PORT_NAME not in oname:
+            continue
+        key = _port_key(oname)
+        ii = next((i for i, n in enumerate(ins) if i not in used_in and _port_key(n) == key), None)
+        if ii is None:
+            ii = next((i for i, n in enumerate(ins) if i not in used_in and PORT_NAME in n), None)
+        if ii is not None:
+            used_in.add(ii)
+            found.append(DeviceInfo("rtmidi", PORT_NAME, oname, oi, ii))
+    return found
+
+
+def find_devices() -> list[DeviceInfo]:
+    if sys.platform.startswith("linux"):
+        devs = _find_rawmidi()
+        if devs:
+            return devs
+    return _find_rtmidi()
+
+
+def open_transport(info: DeviceInfo):
+    if info.backend == "rawmidi":
+        return RawMidi(info.address)
+    return RtMidi(info)
+
+
+class RtMidi:
+    """python-rtmidi transport: WinMM on Windows, CoreMIDI on macOS, ALSA seq on Linux."""
+
+    def __init__(self, info: DeviceInfo):
+        if rtmidi is None:
+            raise DeviceError("Falta python-rtmidi: pip install python-rtmidi")
+        self._q: queue.Queue[bytes] = queue.Queue()
+        self.out = rtmidi.MidiOut()
+        self.inp = rtmidi.MidiIn()
+        try:
+            self.out.open_port(info.out_port)
+            self.inp.open_port(info.in_port)
+        except Exception as e:  # noqa: BLE001 - rtmidi raises its own error types
+            self.close()
+            raise DeviceError(
+                f"No se pudo abrir el puerto MIDI «{info.address}» ({e}). En Windows el puerto es "
+                "exclusivo: cierra M-EFCS u otro programa que lo esté usando."
+            ) from e
+        self.inp.ignore_types(sysex=False, timing=True, active_sense=True)
+        self.inp.set_callback(lambda event, _: self._q.put(bytes(event[0])))
+
+    def close(self) -> None:
+        for port in (getattr(self, "inp", None), getattr(self, "out", None)):
+            if port is not None:
+                try:
+                    port.close_port()
+                    port.delete()
+                except Exception:  # noqa: BLE001 - closing must never raise
+                    pass
+        self.inp = self.out = None
+
+    def write(self, data: bytes) -> None:
+        try:
+            self.out.send_message(list(data))
+        except Exception as e:  # noqa: BLE001
+            raise DeviceError(f"Error de escritura MIDI (¿desconectada?): {e}") from e
+
+    def read(self, timeout: float) -> bytes:
+        try:
+            data = self._q.get(timeout=max(timeout, 0))
+        except queue.Empty:
+            return b""
+        while True:   # drain whatever else already arrived
+            try:
+                data += self._q.get_nowait()
+            except queue.Empty:
+                return data
+
+
 class RawMidi:
-    """Minimal blocking-with-timeout rawmidi transport."""
+    """Minimal blocking-with-timeout ALSA rawmidi transport (Linux)."""
 
     def __init__(self, path: str):
         self.path = path
@@ -129,9 +224,10 @@ class TankG:
         if info is None:
             devs = find_devices()
             if not devs:
-                raise DeviceError("No se encontró la Tank-G (USB 4c4a:c755). ¿Está conectada y encendida?")
+                raise DeviceError("No se encontró la Tank-G (puerto MIDI «USB Composite Device»). "
+                                  "¿Está conectada por USB y encendida?")
             info = devs[0]
-        dev = cls(RawMidi(info.rawmidi), info)
+        dev = cls(open_transport(info), info)
         try:
             dev.read_bank()   # identifies the model: only a Tank-G returns an A5 5A 758-byte bank
         except DeviceError:
