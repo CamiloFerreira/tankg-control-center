@@ -89,7 +89,7 @@ Detalle en [research/FINDINGS.md](research/FINDINGS.md).
 |---|---|
 | Leer banco completo | verificado |
 | Escribir un preset + commit | verificado (ACK y relectura) |
-| Cambio permanente tras apagar | **pendiente de comprobar** |
+| Cambio permanente tras apagar | verificado |
 | Activar preset (Program Change) | verificado |
 | AMP (byte 5), CAB (byte 17) | verificados con la lista oficial |
 | Resto de controles y color LED | posición deducida del manual, pendiente de calibrar |

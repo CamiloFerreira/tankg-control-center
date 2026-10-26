@@ -4,8 +4,8 @@
 Operations and their status (see research/FINDINGS.md):
   read bank      space 0, field 0, len 758                         verified
   write preset   CLS 09, CMD 0x41 + 8*21, space 0, field 2 + 21*slot  verified (ACK + read-back)
-  commit         CLS 09, CMD 0x41, space F, len 0                   verified (ACK); survival
-                                                                   across power cycle unverified
+  commit         CLS 09, CMD 0x41, space F, len 0                   verified (ACK, survives
+                                                                   a power cycle)
   select preset  MIDI Program Change 0..35 on channel 1             verified (pedal switched 1A->1B)
 """
 from __future__ import annotations

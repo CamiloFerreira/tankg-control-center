@@ -57,7 +57,7 @@ Diferencias con MK-300:
 field = `2 + 21·slot`, len 21, payload = registro. Respuesta: ACK
 `F0 00 32 01 08 00 00 00 00 7F 01 F7`. Después COMMIT (`CLS 09 CMD 41`, space F, len 0) → ACK.
 Relectura muestra solo los bytes cambiados (probado en 9D, 1B, y restauración de 9D).
-La relectura ya refleja el cambio antes del COMMIT. **Persistencia tras apagar: sin comprobar.**
+La relectura ya refleja el cambio antes del COMMIT. **Persistencia tras apagar: VERIFICADA 2026-10-26** (36 presets escritos, pedalera desenchufada y reconectada, banco releído idéntico).
 
 **Activar preset [VERIFICADO]:** MIDI Program Change canal 1, programa 0–35 (`C0 01` → 1B).
 
@@ -97,7 +97,6 @@ Backup real: `backups/bank-2026-10-26.bin`
 
 ## 6. Incógnitas que bloquean
 
-1. Persistencia de la escritura tras apagar y encender.
 2. Editar el buffer en vivo sin guardar (como MK-300 space 1) — no investigado.
 3. Mapa completo de los 21 bytes (bloquea editor de parámetros, no la gestión de presets).
 4. Versión de firmware y variante v1/v2.
