@@ -206,11 +206,23 @@ class Settings:
         i, o = self.data.get("midi_in"), self.data.get("midi_out")
         return (i, o) if i and o else None
 
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self.data, indent=2, ensure_ascii=False) + "\n")
+
+    @property
+    def ai(self) -> dict:
+        """{"provider", "model", "base_url", "keys": {provider: api key}} (keys only if remembered)."""
+        return self.data.get("ai", {})
+
+    def set_ai(self, ai: dict) -> None:
+        self.data["ai"] = ai
+        self.save()
+
     def set_midi_ports(self, ports: tuple[str, str] | None) -> None:
         if ports:
             self.data["midi_in"], self.data["midi_out"] = ports
         else:
             self.data.pop("midi_in", None)
             self.data.pop("midi_out", None)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data, indent=2, ensure_ascii=False) + "\n")
+        self.save()

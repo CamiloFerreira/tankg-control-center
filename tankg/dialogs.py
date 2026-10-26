@@ -5,15 +5,15 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QDialog, QFormLayout, QHBoxLayout, QHeaderView,
-    QLabel, QMessageBox, QPlainTextEdit, QPushButton, QRadioButton, QTableWidget, QTableWidgetItem,
-    QVBoxLayout,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QRadioButton,
+    QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
-from . import device, library
+from . import ai, device, library
 from .model import FIELDS, OFF_COLOR, REC_LEN, Bank, slot_name
 
 BYTE_NAMES = {f.offset: f.label for f in FIELDS}
@@ -261,3 +261,173 @@ class MidiPortDialog(QDialog):
             return
         self.settings.set_midi_ports(self._chosen())
         self.accept()
+
+
+_PENDING: set = set()   # running tasks stay referenced even if their dialog is closed
+
+
+class _TaskSignals(QObject):
+    done = Signal(object)
+    failed = Signal(str)
+
+
+class _Task(QRunnable):
+    """Runs fn() in a worker thread (no pedal involved)."""
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+        self.signals = _TaskSignals()
+        self.setAutoDelete(False)
+
+    def run(self) -> None:
+        try:
+            self.signals.done.emit(self.fn())
+        except ai.AIError as e:
+            self.signals.failed.emit(str(e))
+        except Exception as e:  # noqa: BLE001 - surface unexpected errors to the user
+            self.signals.failed.emit(f"Error inesperado: {e}")
+
+
+class AIDialog(QDialog):
+    """Describe a sound in words; an LLM fills every control of the current preset."""
+
+    KEY_URLS = {"claude": "https://console.anthropic.com/settings/keys",
+                "openai": "https://platform.openai.com/api-keys"}
+
+    def __init__(self, main):
+        super().__init__(main)
+        self.main = main
+        self.settings = library.Settings()
+        self.result: tuple | None = None
+        self.setWindowTitle("Crear preset con IA")
+        self.resize(720, 640)
+        lay = QVBoxLayout(self)
+        intro = QLabel("Describe el sonido que quieres con tus palabras. La IA elige amplificador, "
+                       "gabinete, EQ y efectos, y lo carga en el preset seleccionado para que lo "
+                       "escuches antes de guardarlo.")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+        self.prompt = QPlainTextEdit()
+        self.prompt.setPlaceholderText("Ejemplos:\n• crunch tipo AC/DC para riffs\n• limpio con chorus estilo "
+                                       "años 80\n• solo de Gilmour en Comfortably Numb\n• metal moderno muy apretado")
+        self.prompt.setFixedHeight(110)
+        lay.addWidget(self.prompt)
+        form = QFormLayout()
+        self.instrument = QComboBox()
+        self.instrument.addItems(ai.INSTRUMENTS)
+        form.addRow("Instrumento", self.instrument)
+        self.provider = QComboBox()
+        for key, p in ai.PROVIDERS.items():
+            self.provider.addItem(p["label"], key)
+        form.addRow("Servicio de IA", self.provider)
+        self.key = QLineEdit()
+        self.key.setEchoMode(QLineEdit.Password)
+        self.key_link = QLabel()
+        self.key_link.setOpenExternalLinks(True)
+        form.addRow("Clave de API", self.key)
+        form.addRow("", self.key_link)
+        self.remember = QCheckBox("Recordar la clave en este equipo (se guarda sin cifrar en settings.json)")
+        form.addRow("", self.remember)
+        self.model = QLineEdit()
+        form.addRow("Modelo", self.model)
+        self.url = QLineEdit()
+        self.url_label = QLabel("URL del servidor")
+        form.addRow(self.url_label, self.url)
+        lay.addLayout(form)
+        self.output = QPlainTextEdit()
+        self.output.setReadOnly(True)
+        self.output.setPlaceholderText("Aquí aparecerá el preset propuesto.")
+        lay.addWidget(self.output, 1)
+        row = QHBoxLayout()
+        self.gen_btn = QPushButton("✨ Generar")
+        self.gen_btn.clicked.connect(self.generate)
+        self.apply_btn = QPushButton()
+        self.apply_btn.setEnabled(False)
+        self.apply_btn.clicked.connect(self.apply)
+        close = QPushButton("Cerrar")
+        close.clicked.connect(self.reject)
+        row.addWidget(self.gen_btn)
+        row.addWidget(self.apply_btn)
+        row.addWidget(close)
+        lay.addLayout(row)
+
+        saved = self.settings.ai
+        idx = self.provider.findData(saved.get("provider", "claude"))
+        self.provider.setCurrentIndex(max(0, idx))
+        self.remember.setChecked(bool(saved.get("keys")))
+        self.provider.currentIndexChanged.connect(self._provider_changed)
+        self._provider_changed()
+        self.apply_btn.setText(f"Aplicar a {slot_name(main.current)}")
+
+    def _cfg(self) -> ai.AIConfig:
+        return ai.AIConfig(self.provider.currentData(), self.key.text().strip(),
+                           self.model.text().strip(), self.url.text().strip())
+
+    def _provider_changed(self) -> None:
+        key = self.provider.currentData()
+        p = ai.PROVIDERS[key]
+        saved = self.settings.ai
+        same = saved.get("provider") == key
+        self.model.setPlaceholderText(p["model"])
+        self.model.setText(saved.get("model", "") if same else "")
+        self.url.setPlaceholderText(p["url"])
+        self.url.setText(saved.get("base_url", "") if same else "")
+        compatible = key == "compatible"
+        self.url.setVisible(compatible)
+        self.url_label.setVisible(compatible)
+        self.key.setText(saved.get("keys", {}).get(key, ""))
+        env = p["env"]
+        self.key.setPlaceholderText("opcional" if compatible else
+                                    f"sk-…  (o variable de entorno {env})")
+        link = self.KEY_URLS.get(key)
+        self.key_link.setText(f'<a style="color:#5dd3ff" href="{link}">Conseguir una clave</a>' if link else
+                              "Para Ollama: instala Ollama y ejecuta «ollama pull llama3.1».")
+
+    def _save_settings(self) -> None:
+        cfg = self._cfg()
+        saved = dict(self.settings.ai)
+        keys = dict(saved.get("keys", {}))
+        if self.remember.isChecked() and cfg.api_key:
+            keys[cfg.provider] = cfg.api_key
+        elif not self.remember.isChecked():
+            keys = {}
+        self.settings.set_ai({"provider": cfg.provider, "model": cfg.model, "base_url": cfg.base_url,
+                              "keys": keys})
+
+    def generate(self) -> None:
+        text = self.prompt.toPlainText().strip()
+        if not text:
+            QMessageBox.information(self, "IA", "Escribe cómo quieres que suene.")
+            return
+        if self.main.local is None:
+            QMessageBox.information(self, "IA", "Lee primero la pedalera o abre un banco.")
+            return
+        self._save_settings()
+        cfg, instrument = self._cfg(), self.instrument.currentText()
+        like = self.main.local.presets[self.main.current]
+        self.gen_btn.setEnabled(False)
+        self.apply_btn.setEnabled(False)
+        self.output.setPlainText("Pensando el sonido…")
+        task = _Task(lambda: ai.generate(cfg, text, instrument, like))
+        _PENDING.add(task)
+        task.signals.done.connect(lambda r: (_PENDING.discard(task), self.isVisible() and self._done(r)))
+        task.signals.failed.connect(lambda m: (_PENDING.discard(task), self.isVisible() and self._failed(m)))
+        QThreadPool.globalInstance().start(task)
+
+    def _done(self, result) -> None:
+        self.result = result
+        preset, name, explanation = result
+        self.output.setPlainText(f"{name}\n\n{explanation}\n\n{ai.describe(preset)}")
+        self.gen_btn.setEnabled(True)
+        self.apply_btn.setEnabled(True)
+
+    def _failed(self, msg: str) -> None:
+        self.output.setPlainText(f"✗ {msg}")
+        self.gen_btn.setEnabled(True)
+
+    def apply(self) -> None:
+        if self.result:
+            preset, name, _ = self.result
+            self.main.apply_generated(preset, name)
+            self.accept()

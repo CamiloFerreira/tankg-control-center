@@ -80,6 +80,13 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
 - Pedalera → Gestor de backups: lista de copias con fecha y diferencias; cargar o comparar.
 - Pedalera → Asistente de calibración: toma una referencia, guardas desde la pedalera en modo
   LIVE tras mover una perilla y muestra qué byte cambió (anota en `calibration.log`).
+- **✨ Crear con IA** (cabecera del preset o Ctrl+K): describes el sonido con tus palabras
+  («crunch tipo AC/DC», «limpio con chorus de los 80», «solo de Gilmour») y una IA rellena todos
+  los controles, nombra el preset y explica sus decisiones. Queda en el editor para escucharlo
+  antes de guardarlo. Servicios: Claude (Anthropic), ChatGPT (OpenAI) o cualquier servidor
+  compatible con OpenAI (Ollama/LM Studio, local y gratis). Necesita tu propia clave de API
+  (o las variables `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`); la clave solo se guarda si marcas
+  «Recordar» (sin cifrar, en `settings.json`).
 - «Escucha en vivo»: cada cambio se guarda en la pedalera y se activa el preset para oírlo.
 - La conexión y desconexión se detectan solas. La pedalera solo se abre durante cada
   operación, así que no bloquea a PipeWire, a un DAW ni a M-EFCS.

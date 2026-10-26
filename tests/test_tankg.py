@@ -279,3 +279,59 @@ def test_open_skips_candidates_that_are_not_a_tankg(monkeypatch):
                         lambda info: FakePedal(b"\x00" * BANK_LEN if info is a else LIVE))
     dev = TankG.open()
     assert dev.info is b
+
+
+DESIGN = {"name": "Crunch AC/DC", "explanation": "x", "amp_on": True, "amp_type": 6, "gain": 50,
+          "treble": 70, "middle": 68, "bass": 60, "volume": 95, "gate": 20, "cab": 2, "mod_on": False,
+          "mod_type": "phaser", "mod_amount": 50, "mod_speed": 30, "dly_on": True, "dly_type": "tape",
+          "dly_mix": 0, "dly_time": 40, "rvb_on": True, "rvb_type": "cloud", "rvb_decay": 100,
+          "rvb_mix": 300, "led_color": [255, 128, 0]}
+
+
+def test_ai_apply_design_zones_and_clamping():
+    from tankg import ai
+    from tankg.model import FIELD_BY_KEY, zone_of
+    p = ai.apply_design(DESIGN, Bank.from_bytes(LIVE).presets[0])
+    assert p.amp_name == "MS_GV2" and p.cab_name == "JVM_1960_57" and p.color == (255, 128, 0)
+    assert zone_of(FIELD_BY_KEY["mod_fx"], p.get("mod_fx")) == "PHASER"
+    assert zone_of(FIELD_BY_KEY["dly_mix"], p.get("dly_mix")) == "TAPE"
+    assert zone_of(FIELD_BY_KEY["rvb_decay"], p.get("rvb_decay")) == "CLOUD"
+    assert p.get("rvb_mix") == 127 and p.get("mod_on") == 0 and p.get("dly_on") == 1
+
+
+def test_ai_claude_request(monkeypatch):
+    from tankg import ai
+    seen = {}
+
+    def fake_post(url, headers, body, timeout=120):
+        seen.update(url=url, headers=headers, body=body)
+        return {"content": [{"type": "tool_use", "name": "crear_preset", "input": DESIGN}]}
+    monkeypatch.setattr(ai, "_post", fake_post)
+    preset, name, _ = ai.generate(ai.AIConfig("claude", "sk-test"), "crunch", ai.INSTRUMENTS[0])
+    assert name == "Crunch AC/DC" and preset.amp_name == "MS_GV2"
+    assert seen["url"] == "https://api.anthropic.com/v1/messages"
+    assert seen["headers"]["x-api-key"] == "sk-test"
+    assert seen["body"]["tool_choice"] == {"type": "tool", "name": "crear_preset"}
+
+
+def test_ai_openai_request(monkeypatch):
+    import json as _json
+    from tankg import ai
+    seen = {}
+
+    def fake_post(url, headers, body, timeout=120):
+        seen.update(url=url, headers=headers, body=body)
+        return {"choices": [{"message": {"content": _json.dumps(DESIGN)}}]}
+    monkeypatch.setattr(ai, "_post", fake_post)
+    preset, _, _ = ai.generate(ai.AIConfig("openai", "sk-o"), "crunch", ai.INSTRUMENTS[1])
+    assert seen["url"] == "https://api.openai.com/v1/chat/completions"
+    assert seen["headers"]["authorization"] == "Bearer sk-o"
+    assert "minimum" not in _json.dumps(seen["body"]["response_format"])
+    assert preset.cab_name == "JVM_1960_57"
+
+
+def test_ai_requires_key(monkeypatch):
+    from tankg import ai
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(ai.AIError):
+        ai.generate(ai.AIConfig("claude", ""), "x", ai.INSTRUMENTS[0])

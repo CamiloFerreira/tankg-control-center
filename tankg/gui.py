@@ -38,7 +38,7 @@ QToolBar QToolButton:hover { background: #2a3139; }
 QToolBar QToolButton:checked { background: #1f6f6d; }
 QStatusBar { background: #1d2228; color: #aab; }
 QDialog, QMessageBox, QInputDialog { background: #1d2228; color: #e6e6e6; }
-QDialog QLabel, QMessageBox QLabel, QDialog QRadioButton { color: #e6e6e6; }
+QDialog QLabel, QMessageBox QLabel, QDialog QRadioButton, QDialog QCheckBox { color: #e6e6e6; }
 QDialog QPushButton, QMessageBox QPushButton {
     background: #2a3139; color: #e6e6e6; border-radius: 6px; padding: 6px 12px;
 }
@@ -466,6 +466,10 @@ class MainWindow(QMainWindow):
         self.bank_tag.setObjectName("bankTag")
         self.badge = QLabel("modificado")
         self.badge.setObjectName("badge")
+        self.ai_btn = QPushButton("✨ Crear con IA")
+        self.ai_btn.setObjectName("primary")
+        self.ai_btn.setToolTip("Describe un sonido y la IA (Claude, ChatGPT o un modelo local) crea el preset")
+        self.ai_btn.clicked.connect(self.open_ai)
         self.color_btn = QPushButton("Color LED")
         self.color_btn.setObjectName("action")
         self.color_btn.setToolTip("Color del interruptor de este preset (bytes 18-20, deducido)")
@@ -481,6 +485,7 @@ class MainWindow(QMainWindow):
         head.addWidget(self.bank_tag)
         head.addWidget(self.badge)
         head.addStretch()
+        head.addWidget(self.ai_btn)
         head.addWidget(self.color_btn)
         head.addWidget(self.revert_btn)
         head.addWidget(self.send_btn)
@@ -665,6 +670,7 @@ class MainWindow(QMainWindow):
         self._action(m, "Mover a la izquierda", lambda: self.move_preset(-1), "Alt+Left")
         self._action(m, "Mover a la derecha", lambda: self.move_preset(1), "Alt+Right")
         m.addSeparator()
+        self._action(m, "Crear preset con IA...", self.open_ai, "Ctrl+K")
         m.addMenu(self._template_menu())
         self._action(m, "Restaurar preset de fábrica", self.factory_selected)
         self._action(m, "Restaurar banco actual de fábrica", self.factory_current_bank)
@@ -1062,6 +1068,16 @@ class MainWindow(QMainWindow):
         if self._need_local():
             self._set_local(self.current, templates.build(name, self.local.presets[self.current]))
             self.statusBar().showMessage(f"Plantilla «{name}» aplicada a {slot_name(self.current)}", 4000)
+
+    def open_ai(self) -> None:
+        if self._need_local():
+            dialogs.AIDialog(self).exec()
+
+    def apply_generated(self, preset: Preset, name: str) -> None:
+        self.aliases.set_preset(self.current, name)
+        self._set_local(self.current, preset)
+        self.statusBar().showMessage(f"Preset «{name}» creado con IA en {slot_name(self.current)}. "
+                                     "Escúchalo (o activa «Escucha en vivo») y pulsa «Guardar preset».", 8000)
 
     def run_job(self, fn, on_done, label: str) -> bool:
         """For dialogs: run fn(dev, report) in the background."""
