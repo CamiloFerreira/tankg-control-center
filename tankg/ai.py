@@ -15,6 +15,13 @@ from dataclasses import dataclass
 
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, Preset
 
+# Browser mode: no API key, the user pastes the prompt in a chat web page and copies the answer.
+WEB_SITES = {
+    "Claude": "https://claude.ai/new",
+    "ChatGPT": "https://chatgpt.com/",
+    "Gemini": "https://gemini.google.com/app",
+}
+
 PROVIDERS = {
     "claude": {"label": "Claude (Anthropic)", "model": "claude-sonnet-5-5",
                "url": "https://api.anthropic.com", "env": "ANTHROPIC_API_KEY"},
@@ -253,3 +260,51 @@ def describe(preset: Preset) -> str:
             f"MOD {onoff('mod_on')}: FX {g('mod_fx')} SPEED {g('mod_speed')} · "
             f"DELAY {onoff('dly_on')}: MIX {g('dly_mix')} TIME {g('dly_time')} · "
             f"REVERB {onoff('rvb_on')}: DECAY {g('rvb_decay')} MIX {g('rvb_mix')}")
+
+
+def web_prompt(description: str, instrument: str) -> str:
+    """Self-contained prompt for a chat web page (browser mode)."""
+    keys = ", ".join(f'"{k}"' for k in SCHEMA["required"])
+    return (f"{SYSTEM}\n\n"
+            f"Instrumento: {instrument}\nSonido deseado: {description.strip()}\n\n"
+            "Responde ÚNICAMENTE con un bloque de código JSON (```json ... ```) que tenga exactamente "
+            f"estas claves: {keys}. Tipos: amp_on/mod_on/dly_on/rvb_on booleanos; mod_type uno de "
+            "chorus|phaser|tremolo; dly_type uno de analog|tape|dual; rvb_type uno de room|spring|cloud; "
+            "led_color lista [R, G, B] de 0 a 255; el resto números enteros en los rangos indicados; "
+            "name y explanation en español.")
+
+
+def parse_design_text(text: str) -> dict | None:
+    """Find the preset JSON in a chat answer (fenced or bare). None if there is none."""
+    import re
+    candidates = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+    start = text.find("{")
+    if start >= 0:
+        depth = 0
+        for i, ch in enumerate(text[start:], start):
+            depth += ch == "{"
+            depth -= ch == "}"
+            if depth == 0:
+                candidates.append(text[start:i + 1])
+                break
+    for c in candidates:
+        try:
+            design = json.loads(c)
+        except ValueError:
+            continue
+        if isinstance(design, dict) and all(k in design for k in SCHEMA["required"]):
+            return design
+    return None
+
+
+def from_text(text: str, like: Preset | None = None) -> tuple[Preset, str, str]:
+    """Browser mode: build the preset from the copied chat answer."""
+    design = parse_design_text(text)
+    if design is None:
+        raise AIError("No encontré el preset en el texto copiado. Copia la respuesta completa de la IA "
+                      "(el bloque JSON).")
+    try:
+        preset = apply_design(design, like)
+    except (TypeError, ValueError) as e:
+        raise AIError(f"Valores no válidos en la respuesta de la IA: {e}") from e
+    return preset, str(design["name"])[:40], str(design["explanation"])

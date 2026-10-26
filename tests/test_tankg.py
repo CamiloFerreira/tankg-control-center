@@ -335,3 +335,17 @@ def test_ai_requires_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(ai.AIError):
         ai.generate(ai.AIConfig("claude", ""), "x", ai.INSTRUMENTS[0])
+
+
+def test_ai_web_mode_parsing():
+    import json as _json
+    from tankg import ai
+    prompt = ai.web_prompt("crunch", ai.INSTRUMENTS[0])
+    assert "crunch" in prompt and '"rvb_type"' in prompt
+    answer = "¡Claro! Aquí tienes:\n```json\n" + _json.dumps(DESIGN, ensure_ascii=False) + "\n```\nDisfrútalo."
+    preset, name, _ = ai.from_text(answer)
+    assert name == "Crunch AC/DC" and preset.amp_name == "MS_GV2"
+    assert ai.parse_design_text("texto " + _json.dumps(DESIGN) + " más texto") is not None
+    assert ai.parse_design_text("hola sin json") is None
+    with pytest.raises(ai.AIError):
+        ai.from_text('{"name": "incompleto"}')

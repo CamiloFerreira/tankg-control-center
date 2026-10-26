@@ -48,6 +48,13 @@ QPlainTextEdit, QTableWidget, QLineEdit {
     background: #10181b; color: #e6e6e6; border: 1px solid #333c46; selection-background-color: #1f7f7d;
 }
 QHeaderView::section { background: #262d35; color: #c8d0d8; border: none; padding: 4px; }
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: #3a4450; border-radius: 4px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #4a5663; }
+QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
+QScrollBar::handle:horizontal { background: #3a4450; border-radius: 4px; min-width: 30px; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 QMenu { background: #1d2228; color: #e6e6e6; border: 1px solid #333c46; }
 QMenu::item:selected { background: #1f6f6d; }
 QFrame#browser { background: #1d2228; border-radius: 10px; }
