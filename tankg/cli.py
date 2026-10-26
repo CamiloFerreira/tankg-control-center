@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "info":
             devs = find_devices()
             if not devs:
-                print("No se encontró ningún dispositivo 4c4a:c755.")
+                print("No se encontró la Tank-G. Usa «ports» para ver los puertos MIDI y elegir uno.")
                 return 1
             for d in devs:
                 print(d.describe())

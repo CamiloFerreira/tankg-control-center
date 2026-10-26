@@ -73,6 +73,9 @@ def _port_key(name: str) -> str:
 
 
 PORT_HINTS = ("usb composite device", "tank", "m-vave", "mvave", "jieli")
+# Generic names Windows gives class-compliant devices without a product string (seen on a real
+# Windows PC: "USB-Midi 0" in / "USB-Midi 1" out). Only accepted after the bank read identifies it.
+WEAK_PORT_HINTS = ("usb-midi", "usb midi")
 
 
 def list_midi_ports() -> tuple[list[str], list[str]]:
@@ -94,6 +97,14 @@ def _looks_like_tankg(name: str) -> bool:
     return any(h in low for h in PORT_HINTS)
 
 
+def _port_score(name: str) -> int:
+    """2 = name points at the Tank-G, 1 = generic USB-MIDI name, 0 = unrelated."""
+    if _looks_like_tankg(name):
+        return 2
+    low = name.lower()
+    return 1 if any(h in low for h in WEAK_PORT_HINTS) else 0
+
+
 def _find_rtmidi() -> list[DeviceInfo]:
     try:
         ins, outs = list_midi_ports()
@@ -101,16 +112,17 @@ def _find_rtmidi() -> list[DeviceInfo]:
         return []
     found = []
     used_in: set[int] = set()
-    for oi, oname in enumerate(outs):
-        if not _looks_like_tankg(oname):
-            continue
-        key = _port_key(oname)
-        ii = next((i for i, n in enumerate(ins) if i not in used_in and _port_key(n) == key), None)
-        if ii is None:
-            ii = next((i for i, n in enumerate(ins) if i not in used_in and _looks_like_tankg(n)), None)
-        if ii is not None:
-            used_in.add(ii)
-            found.append(DeviceInfo("rtmidi", PORT_NAME, oname, oi, ii))
+    for score in (2, 1):   # specific names first, generic USB-MIDI names last
+        for oi, oname in enumerate(outs):
+            if _port_score(oname) != score:
+                continue
+            key = _port_key(oname)
+            ii = next((i for i, n in enumerate(ins) if i not in used_in and _port_key(n) == key), None)
+            if ii is None:
+                ii = next((i for i, n in enumerate(ins) if i not in used_in and _port_score(n) == score), None)
+            if ii is not None:
+                used_in.add(ii)
+                found.append(DeviceInfo("rtmidi", PORT_NAME if score == 2 else "USB-MIDI genérico", oname, oi, ii))
     return found
 
 
@@ -256,19 +268,24 @@ class TankG:
 
     @classmethod
     def open(cls, info: DeviceInfo | None = None) -> "TankG":
-        if info is None:
-            devs = find_devices()
-            if not devs:
-                raise DeviceError("No se encontró la Tank-G (puerto MIDI «USB Composite Device»). "
-                                  "¿Está conectada por USB y encendida?")
-            info = devs[0]
-        dev = cls(open_transport(info), info)
-        try:
-            dev.read_bank()   # identifies the model: only a Tank-G returns an A5 5A 758-byte bank
-        except DeviceError:
-            dev.close()
-            raise
-        return dev
+        candidates = [info] if info is not None else find_devices()
+        if not candidates:
+            raise DeviceError("No se encontró la Tank-G. ¿Está conectada por USB y encendida? "
+                              "Si lo está, elige el puerto en Pedalera → Puerto MIDI…")
+        error: DeviceError | None = None
+        for cand in candidates:
+            try:
+                dev = cls(open_transport(cand), cand)
+            except DeviceError as e:
+                error = e
+                continue
+            try:
+                dev.read_bank()   # identifies the model: only a Tank-G returns an A5 5A 758-byte bank
+                return dev
+            except DeviceError as e:
+                dev.close()
+                error = e
+        raise error
 
     def close(self) -> None:
         self.t.close()

@@ -250,3 +250,32 @@ def test_port_hints():
     assert device._looks_like_tankg("MIDIIN2 (TANK-G)")
     assert device._looks_like_tankg("M-VAVE MIDI 1")
     assert not device._looks_like_tankg("Microsoft GS Wavetable Synth")
+
+
+def test_generic_windows_usb_midi_names(monkeypatch):
+    from tankg import device
+    monkeypatch.setattr(_FakeRt, "outs", ["Microsoft GS Wavetable Synth 0", "USB-Midi 1"])
+    monkeypatch.setattr(_FakeRt, "ins", ["USB-Midi 0"])
+    monkeypatch.setattr(device, "rtmidi", _FakeRt)
+    devs = device._find_rtmidi()
+    assert [(d.in_port, d.out_port) for d in devs] == [(0, 1)]
+
+
+def test_specific_names_before_generic(monkeypatch):
+    from tankg import device
+    monkeypatch.setattr(_FakeRt, "outs", ["USB-Midi 0", "MIDIOUT2 (TANK-G) 1"])
+    monkeypatch.setattr(_FakeRt, "ins", ["USB-Midi 0", "MIDIIN2 (TANK-G) 1"])
+    monkeypatch.setattr(device, "rtmidi", _FakeRt)
+    devs = device._find_rtmidi()
+    assert devs[0].address == "MIDIOUT2 (TANK-G) 1" and devs[1].address == "USB-Midi 0"
+
+
+def test_open_skips_candidates_that_are_not_a_tankg(monkeypatch):
+    from tankg import device
+    a = device.DeviceInfo("rtmidi", "x", "otro aparato")
+    b = device.DeviceInfo("rtmidi", "x", "tank-g")
+    monkeypatch.setattr(device, "find_devices", lambda: [a, b])
+    monkeypatch.setattr(device, "open_transport",
+                        lambda info: FakePedal(b"\x00" * BANK_LEN if info is a else LIVE))
+    dev = TankG.open()
+    assert dev.info is b
