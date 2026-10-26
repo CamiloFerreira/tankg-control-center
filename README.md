@@ -53,9 +53,25 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
   al título (F2); clic en «BANCO n» para nombrar el banco (Shift+F2). Se guardan en
   `~/.local/share/tankg/aliases.json` (Windows: `%APPDATA%\tankg\aliases.json`), siguen al preset al intercambiar/duplicar y viajan
   dentro de los `.tgpreset`.
+- Plantillas («Plantilla» en la barra o Editar → Nuevo desde plantilla): limpio, crunch,
+  overdrive, distorsión, alta ganancia, solo, ambiental, acústica, bajo, vacío.
+- Fábrica: restaurar el preset, el banco actual o los 36 presets de fábrica (se cargan en el
+  editor; «Guardar» los pasa a la pedalera).
+- Compartir: Archivo → Exportar/Importar banco (`.tgset`, 4 presets con sus nombres), además
+  de presets sueltos (`.tgpreset`) y bancos completos (`.tgbank`).
+- Pedalera → Gestor de backups: lista de copias con fecha y diferencias; cargar o comparar.
+- Pedalera → Asistente de calibración: toma una referencia, guardas desde la pedalera en modo
+  LIVE tras mover una perilla y muestra qué byte cambió (anota en `calibration.log`).
 - «Escucha en vivo»: cada cambio se guarda en la pedalera y se activa el preset para oírlo.
 - La conexión y desconexión se detectan solas. La pedalera solo se abre durante cada
   operación, así que no bloquea a PipeWire, a un DAW ni a M-EFCS.
+
+## No soportado (todavía)
+
+Funciones de M-EFCS cuyo protocolo para Tank-G no está verificado y que no se implementan para
+no arriesgar los datos de la pedalera: importar IR/CAB, interruptor Loopback (USB) y otros
+ajustes globales, actualización de firmware. Se podrán añadir con una captura del editor
+oficial (ver research/FINDINGS.md §7).
 
 ## Seguridad
 
@@ -83,7 +99,8 @@ Detalle en [research/FINDINGS.md](research/FINDINGS.md).
 
 - `.tgbank`: imagen de 758 bytes (`A5 5A` + 36 × 21 bytes), igual a la de la pedalera y a
   `tankG_*_preset.bin` de M-EFCS.
-- `.tgpreset`: JSON con los 21 bytes en hexadecimal (`raw`) y campos legibles.
+- `.tgpreset`: JSON con los 21 bytes en hexadecimal (`raw`), nombre y campos legibles.
+- `.tgset`: JSON con varios presets (normalmente un banco de 4) y sus nombres.
 
 El banco de fábrica se toma de `research/factory/tankG_am4_preset.bin` (extraído de M-EFCS,
 propiedad de M-VAVE, solo para uso local) o de `~/.local/share/tankg/factory.tgbank`.

@@ -8,16 +8,17 @@ from __future__ import annotations
 
 import sys
 import traceback
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QInputDialog, QLabel, QLineEdit, QMenu, QToolButton, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QSlider, QSpinBox, QStyle, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import library
+from . import dialogs, library, templates
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_of
 
@@ -34,6 +35,19 @@ QToolBar QToolButton { color: #e6e6e6; padding: 6px 10px; border-radius: 6px; }
 QToolBar QToolButton:hover { background: #2a3139; }
 QToolBar QToolButton:checked { background: #1f6f6d; }
 QStatusBar { background: #1d2228; color: #aab; }
+QDialog, QMessageBox, QInputDialog { background: #1d2228; color: #e6e6e6; }
+QDialog QLabel, QMessageBox QLabel { color: #e6e6e6; }
+QDialog QPushButton, QMessageBox QPushButton {
+    background: #2a3139; color: #e6e6e6; border-radius: 6px; padding: 6px 12px;
+}
+QDialog QPushButton:hover, QMessageBox QPushButton:hover { background: #343d47; }
+QDialog QPushButton:disabled { color: #6b7480; }
+QPlainTextEdit, QTableWidget, QLineEdit {
+    background: #10181b; color: #e6e6e6; border: 1px solid #333c46; selection-background-color: #1f7f7d;
+}
+QHeaderView::section { background: #262d35; color: #c8d0d8; border: none; padding: 4px; }
+QMenu { background: #1d2228; color: #e6e6e6; border: 1px solid #333c46; }
+QMenu::item:selected { background: #1f6f6d; }
 QFrame#browser { background: #1d2228; border-radius: 10px; }
 QPushButton#bankHead {
     color: #8a96a3; font-weight: bold; text-align: left; border: none; padding: 0 2px; font-size: 11px;
@@ -585,9 +599,15 @@ class MainWindow(QMainWindow):
         add("Pegar", self.paste_preset, QStyle.SP_FileDialogContentsView, "Ctrl+V")
         add("Intercambiar", self.swap_preset, QStyle.SP_BrowserStop, "Intercambiar con otro slot")
         add("Fábrica", self.factory_selected, QStyle.SP_DialogResetButton, "Restaurar el preset de fábrica")
+        tpl = QToolButton()
+        tpl.setText("Plantilla")
+        tpl.setIcon(icon(QStyle.SP_FileIcon))
+        tpl.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        tpl.setPopupMode(QToolButton.InstantPopup)
+        tpl.setToolTip("Reemplazar este preset por una plantilla")
+        tpl.setMenu(self._template_menu())
+        tb.addWidget(tpl)
         tb.addSeparator()
-        add("Importar", self.import_preset, QStyle.SP_DialogOpenButton, "Importar .tgpreset en este slot")
-        add("Exportar", self.export_preset, QStyle.SP_DriveFDIcon, "Exportar este preset a .tgpreset")
         add("Backup", self.backup_device, QStyle.SP_DriveHDIcon, "Backup del banco de la pedalera (Ctrl+B)")
         tb.addSeparator()
         self.live_action = QAction(icon(QStyle.SP_MediaVolume), "Escucha en vivo", self)
@@ -614,6 +634,9 @@ class MainWindow(QMainWindow):
         self._action(m, "Importar preset...", self.import_preset, "Ctrl+I")
         self._action(m, "Exportar preset...", self.export_preset, "Ctrl+E")
         m.addSeparator()
+        self._action(m, "Exportar banco actual (4 presets con nombres)...", self.export_bank_set)
+        self._action(m, "Importar banco (.tgset) en el banco actual...", self.import_bank_set)
+        m.addSeparator()
         self._action(m, "Comparar con archivo de banco...", self.compare_file)
         self._action(m, "Salir", self.close, "Ctrl+Q")
         m = mb.addMenu("&Pedalera")
@@ -624,6 +647,9 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         self._action(m, "Backup de la pedalera", self.backup_device, "Ctrl+B")
         self._action(m, "Restaurar banco desde archivo...", self.restore_to_device)
+        self._action(m, "Gestor de backups...", lambda: dialogs.BackupManager(self).exec())
+        m.addSeparator()
+        self._action(m, "Asistente de calibración...", lambda: dialogs.CalibrationWizard(self).exec())
         m = mb.addMenu("&Editar")
         self._action(m, "Deshacer", self.undo, "Ctrl+Z")
         m.addSeparator()
@@ -636,7 +662,10 @@ class MainWindow(QMainWindow):
         self._action(m, "Mover a la izquierda", lambda: self.move_preset(-1), "Alt+Left")
         self._action(m, "Mover a la derecha", lambda: self.move_preset(1), "Alt+Right")
         m.addSeparator()
+        m.addMenu(self._template_menu())
         self._action(m, "Restaurar preset de fábrica", self.factory_selected)
+        self._action(m, "Restaurar banco actual de fábrica", self.factory_current_bank)
+        self._action(m, "Restaurar los 36 presets de fábrica", self.factory_all)
         self._action(m, "Revertir este preset", self.revert_selected)
         self._action(m, "Revertir todo", self.revert_all)
         m = mb.addMenu("A&yuda")
@@ -978,15 +1007,68 @@ class MainWindow(QMainWindow):
         self.current = b
         self.refresh()
 
-    def factory_selected(self) -> None:
+    def _factory(self) -> Bank | None:
         if not self._need_local():
-            return
+            return None
         factory = library.factory_bank()
         if factory is None:
             QMessageBox.warning(self, "Fábrica", "No se encontró el banco de fábrica "
                                 "(research/factory/tankG_am4_preset.bin).")
+        return factory
+
+    def _restore_factory(self, slots: list[int]) -> None:
+        factory = self._factory()
+        if factory is None:
             return
-        self._set_local(self.current, factory.presets[self.current])
+        self._push_undo()
+        for s in slots:
+            self.local.presets[s] = factory.presets[s].copy()
+        self.refresh()
+        self._schedule_live()
+        self.statusBar().showMessage("Presets de fábrica cargados en el editor. «Guardar» los pasa a la pedalera.",
+                                     6000)
+
+    def factory_selected(self) -> None:
+        self._restore_factory([self.current])
+
+    def factory_current_bank(self) -> None:
+        first = self.current // 4 * 4
+        self._restore_factory(list(range(first, first + 4)))
+
+    def factory_all(self) -> None:
+        if QMessageBox.question(self, "Fábrica", "¿Cargar en el editor los 36 presets de fábrica?\n"
+                                "La pedalera no cambia hasta que pulses «Guardar todo».") == QMessageBox.Yes:
+            self._restore_factory(list(range(SLOTS)))
+
+    def _template_menu(self) -> QMenu:
+        menu = QMenu("Nuevo desde plantilla", self)
+        for name in templates.TEMPLATES:
+            menu.addAction(name, lambda n=name: self.apply_template(n))
+        return menu
+
+    def apply_template(self, name: str) -> None:
+        if self._need_local():
+            self._set_local(self.current, templates.build(name, self.local.presets[self.current]))
+            self.statusBar().showMessage(f"Plantilla «{name}» aplicada a {slot_name(self.current)}", 4000)
+
+    def run_job(self, fn, on_done, label: str) -> bool:
+        """For dialogs: run fn(dev, report) in the background."""
+        return self._run(fn, on_done, label)
+
+    def load_local_bank(self, bank: Bank, message: str) -> None:
+        self._push_undo()
+        self.local = bank
+        self.refresh()
+        self.statusBar().showMessage(message, 6000)
+
+    def show_diff(self, other: Bank, title: str) -> None:
+        lines = []
+        for s in self.local.diff_slots(other):
+            a, b = self.local.presets[s].raw, other.presets[s].raw
+            name = self.aliases.preset(s)
+            changes = ", ".join(f"{dialogs.byte_name(i)} {b[i]}→{a[i]}" for i in range(len(a)) if a[i] != b[i])
+            lines.append(f"{slot_name(s)}{f' ({name})' if name else ''}: {changes}")
+        QMessageBox.information(self, "Comparación", "Idénticos." if not lines else f"{title}:\n" + "\n".join(lines))
 
     def revert_selected(self) -> None:
         if self.device is not None and self.local is not None:
@@ -1014,10 +1096,7 @@ class MainWindow(QMainWindow):
     def open_bank(self) -> None:
         bank = self._open_bank_dialog("Abrir banco")
         if bank is not None:
-            self._push_undo()
-            self.local = bank
-            self.refresh()
-            self.statusBar().showMessage("Banco abierto. «Guardar todo» lo pasa a la pedalera.", 6000)
+            self.load_local_bank(bank, "Banco abierto. «Guardar todo» lo pasa a la pedalera.")
 
     def save_bank(self) -> None:
         if not self._need_local():
@@ -1054,15 +1133,45 @@ class MainWindow(QMainWindow):
         if not self._need_local():
             return
         other = self._open_bank_dialog("Comparar con")
-        if other is None:
+        if other is not None:
+            self.show_diff(other, "Archivo → editor")
+
+    def export_bank_set(self) -> None:
+        if not self._need_local():
             return
-        lines = []
-        for s in self.local.diff_slots(other):
-            a, b = self.local.presets[s].raw, other.presets[s].raw
-            lines.append(f"{slot_name(s)}: " + ", ".join(
-                f"b{i}: {b[i]:02x}→{a[i]:02x}" for i in range(len(a)) if a[i] != b[i]))
-        QMessageBox.information(self, "Comparación", "Idénticos." if not lines else
-                                "Archivo → actual:\n" + "\n".join(lines))
+        bank = self.current // 4
+        title = self.aliases.bank(bank) or f"Banco {bank + 1}"
+        path, _ = QFileDialog.getSaveFileName(self, "Exportar banco", f"{title}.tgset", "Banco Tank-G con nombres (*.tgset)")
+        if path:
+            library.save_set(self.local, list(range(bank * 4, bank * 4 + 4)), path, self.aliases, title)
+            self.statusBar().showMessage(f"Exportado {path}", 5000)
+
+    def import_bank_set(self) -> None:
+        if not self._need_local():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Importar banco", "", "Banco Tank-G con nombres (*.tgset)")
+        if not path:
+            return
+        try:
+            title, items = library.load_set(path)
+        except (ValueError, OSError, KeyError) as e:
+            QMessageBox.critical(self, "Error", str(e))
+            return
+        bank = self.current // 4
+        items = items[:4]
+        if QMessageBox.question(self, "Importar banco", f"¿Reemplazar los presets {bank + 1}A–{bank + 1}"
+                                f"{'ABCD'[len(items) - 1]} del editor con «{title or Path(path).stem}»?") \
+                != QMessageBox.Yes:
+            return
+        self._push_undo()
+        for i, (preset, name) in enumerate(items):
+            slot = bank * 4 + i
+            self.local.presets[slot] = preset
+            self.aliases.set_preset(slot, name or "")
+        if title:
+            self.aliases.set_bank(bank, title)
+        self.refresh()
+        self._schedule_live()
 
     def show_bytes(self) -> None:
         if not self._need_local():

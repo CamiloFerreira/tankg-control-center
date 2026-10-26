@@ -150,3 +150,37 @@ class Aliases:
         if na:
             self.presets[slot_name(b)] = na
         self.save()
+
+
+SET_FORMAT = "tankg-set"
+
+
+def save_set(bank: Bank, slots: list[int], path: str | Path, aliases: "Aliases | None" = None,
+             title: str | None = None) -> Path:
+    """Several presets with their names, e.g. one bank of 4 to share."""
+    doc = {
+        "format": SET_FORMAT,
+        "version": 1,
+        "title": title,
+        "presets": [
+            {"slot": slot_name(s), "name": (aliases.preset(s) if aliases else "") or None,
+             "raw": bank.presets[s].to_bytes().hex()}
+            for s in slots
+        ],
+    }
+    path = Path(path)
+    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    return path
+
+
+def load_set(path: str | Path) -> tuple[str | None, list[tuple[Preset, str | None]]]:
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise ValueError(f"{path}: no es un archivo .tgset válido") from e
+    if doc.get("format") != SET_FORMAT:
+        raise ValueError(f"{path}: formato desconocido {doc.get('format')!r}")
+    items = [(Preset.from_hex(it["raw"]), it.get("name") or None) for it in doc.get("presets", [])]
+    if not items:
+        raise ValueError(f"{path}: no contiene presets")
+    return doc.get("title") or None, items

@@ -209,3 +209,22 @@ def test_rtmidi_port_matching_alsa_names(monkeypatch):
     monkeypatch.setattr(device, "rtmidi", _FakeRt)
     devs = device._find_rtmidi()
     assert [(d.out_port, d.in_port) for d in devs] == [(1, 1)]
+
+
+def test_set_roundtrip(tmp_path):
+    bank = Bank.from_bytes(LIVE)
+    aliases = library.Aliases(tmp_path / "a.json")
+    aliases.set_preset(4, "Uno")
+    path = library.save_set(bank, [4, 5, 6, 7], tmp_path / "b.tgset", aliases, "Banco 2")
+    title, items = library.load_set(path)
+    assert title == "Banco 2" and [n for _, n in items] == ["Uno", None, None, None]
+    assert [p for p, _ in items] == bank.presets[4:8]
+
+
+def test_templates_valid():
+    from tankg import templates
+    like = Bank.from_bytes(LIVE).presets[0]
+    for name in templates.TEMPLATES:
+        p = templates.build(name, like)
+        assert len(p.to_bytes()) == 21
+    assert templates.build("Bajo").cab_name == "HIFI_YAMAHA"
