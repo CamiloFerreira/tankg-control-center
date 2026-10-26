@@ -6,12 +6,14 @@ each operation, so other programs (M-EFCS, DAWs, PipeWire) keep access to it.
 """
 from __future__ import annotations
 
+import ctypes.util
+import os
 import sys
 import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QKeySequence
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMenu, QToolButton, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
@@ -1197,11 +1199,30 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+def _choose_qt_platform() -> None:
+    """Qt >= 6.5 needs libxcb-cursor0 for X11; on a Wayland session without it use Wayland
+    (same logic as run.sh, needed when started from the packaged executable)."""
+    if not sys.platform.startswith("linux") or os.environ.get("QT_QPA_PLATFORM"):
+        return
+    if not os.environ.get("WAYLAND_DISPLAY"):
+        runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+        sockets = sorted(runtime.glob("wayland-[0-9]"))
+        if sockets:
+            os.environ["WAYLAND_DISPLAY"] = sockets[0].name
+    if os.environ.get("WAYLAND_DISPLAY"):
+        os.environ["QT_QPA_PLATFORM"] = "wayland" if ctypes.util.find_library("xcb-cursor") is None \
+            else "wayland;xcb"
+
+
 def main() -> int:
+    _choose_qt_platform()
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Tank-G Control Center")
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE)
+    icon = library.PROJECT_ROOT / "packaging/icon.png"
+    if icon.exists():
+        app.setWindowIcon(QIcon(str(icon)))
     w = MainWindow()
     w.show()
     return app.exec()

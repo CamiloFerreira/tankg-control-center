@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from .model import Bank, Preset, slot_name
 
 PRESET_FORMAT = "tankg-preset"
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# In a PyInstaller build bundled data files are unpacked under sys._MEIPASS.
+PROJECT_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
 if os.name == "nt":
     DATA_DIR = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "tankg"
 else:

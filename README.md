@@ -7,7 +7,21 @@ necesita drivers).
 - Linux: ALSA rawmidi (`/dev/snd/midiC*D0`), sin dependencias MIDI.
 - Windows / macOS: `python-rtmidi` (se instala solo).
 
-## Windows
+## Ejecutable (sin Python)
+
+En **Releases** de GitHub: `TankG-windows-x64.exe` (Windows) y `TankG-linux-x86_64` (Linux), un
+solo archivo cada uno. Para generarlos localmente:
+
+```bash
+.venv/bin/pip install pyinstaller
+.venv/bin/python packaging/build.py        # → dist/TankG (dist\TankG.exe en Windows)
+packaging/install-linux.sh                 # Linux: copia a ~/.local/bin y añade la app al menú
+```
+
+Una etiqueta `vX.Y.Z` subida a GitHub compila ambos y publica el release
+(`.github/workflows/release.yml`).
+
+## Windows (desde el código)
 
 1. Instala Python 3.11+ desde https://www.python.org/downloads/ marcando **Add python.exe to PATH**.
 2. Descarga el proyecto (Code → Download ZIP, o `git clone`).

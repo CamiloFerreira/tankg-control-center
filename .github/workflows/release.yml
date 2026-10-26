@@ -1,0 +1,62 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04      # older glibc: the binary runs on more distributions
+            asset: TankG-linux-x86_64
+            binary: dist/TankG
+          - os: windows-latest
+            asset: TankG-windows-x64.exe
+            binary: dist/TankG.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Qt system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q libegl1 libxkbcommon0
+      - run: python -m pip install -r requirements.txt pyinstaller
+      - run: python -m pytest -q
+      - run: python packaging/build.py
+      - name: Smoke test (CLI help)
+        run: ${{ matrix.binary }} list --help
+      - name: Rename
+        shell: bash
+        run: mv "${{ matrix.binary }}" "${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x assets/TankG-linux-x86_64
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --title "Tank-G Control Center $GITHUB_REF_NAME" \
+            --notes-file packaging/RELEASE_NOTES.md
