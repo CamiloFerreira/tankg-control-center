@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QSlider, QSpinBox, QStyle, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import dialogs, library, templates
+from . import dialogs, library, templates, theme
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_of
 
@@ -31,32 +31,7 @@ SECTION_COLORS = {
 LIVE_DELAY_MS = 700
 
 STYLE = """
-QMainWindow, QWidget#root { background: #15191d; color: #e6e6e6; }
-QToolBar { background: #1d2228; border: none; padding: 4px; spacing: 4px; }
-QToolBar QToolButton { color: #e6e6e6; padding: 6px 10px; border-radius: 6px; }
-QToolBar QToolButton:hover { background: #2a3139; }
-QToolBar QToolButton:checked { background: #1f6f6d; }
-QStatusBar { background: #1d2228; color: #aab; }
-QDialog, QMessageBox, QInputDialog { background: #1d2228; color: #e6e6e6; }
-QDialog QLabel, QMessageBox QLabel, QDialog QRadioButton, QDialog QCheckBox { color: #e6e6e6; }
-QDialog QPushButton, QMessageBox QPushButton {
-    background: #2a3139; color: #e6e6e6; border-radius: 6px; padding: 6px 12px;
-}
-QDialog QPushButton:hover, QMessageBox QPushButton:hover { background: #343d47; }
-QDialog QPushButton:disabled { color: #6b7480; }
-QPlainTextEdit, QTableWidget, QLineEdit {
-    background: #10181b; color: #e6e6e6; border: 1px solid #333c46; selection-background-color: #1f7f7d;
-}
-QHeaderView::section { background: #262d35; color: #c8d0d8; border: none; padding: 4px; }
-QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
-QScrollBar::handle:vertical { background: #3a4450; border-radius: 4px; min-height: 30px; }
-QScrollBar::handle:vertical:hover { background: #4a5663; }
-QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
-QScrollBar::handle:horizontal { background: #3a4450; border-radius: 4px; min-width: 30px; }
-QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
-QScrollBar::add-page, QScrollBar::sub-page { background: none; }
-QMenu { background: #1d2228; color: #e6e6e6; border: 1px solid #333c46; }
-QMenu::item:selected { background: #1f6f6d; }
+/* Pedal panel and main-window specifics; shared rules live in theme.QSS. */
 QFrame#browser { background: #1d2228; border-radius: 10px; }
 QPushButton#bankHead {
     color: #8a96a3; font-weight: bold; text-align: left; border: none; padding: 0 2px; font-size: 11px;
@@ -81,14 +56,10 @@ QLabel#knobLabel { color: #10302f; font-size: 10px; font-weight: bold; }
 QLabel#zone { color: #0d2e2d; font-size: 10px; }
 QLabel#sectionTitle { color: #0d2e2d; font-weight: bold; letter-spacing: 1px; }
 QFrame#section { background: rgba(0,0,0,0.08); border-radius: 10px; }
-QComboBox {
-    background: #10181b; color: #f0f0f0; border: 1px solid #0c3b3a; border-radius: 4px; padding: 2px 4px;
-}
 QSpinBox {
     background: #10181b; color: #f0f0f0; border: 1px solid #0c3b3a; border-radius: 4px; font-weight: bold;
 }
 QSpinBox::up-button, QSpinBox::down-button { width: 0px; border: none; }
-QComboBox QAbstractItemView { background: #10181b; color: #f0f0f0; selection-background-color: #1f7f7d; }
 QLabel#display {
     background: #050708; color: #ff3b30; border-radius: 6px; padding: 4px 12px;
     font-family: monospace; font-size: 30px; font-weight: bold;
@@ -102,14 +73,6 @@ QLabel#footLabel { color: #0d2e2d; font-weight: bold; }
 QPushButton#bank {
     background: #1b5e5c; color: #e9fffe; border-radius: 6px; padding: 6px 12px; font-weight: bold;
 }
-QPushButton#action {
-    background: #2a3139; color: #e6e6e6; border-radius: 6px; padding: 6px 12px;
-}
-QPushButton#action:hover { background: #343d47; }
-QPushButton#primary {
-    background: #1f9e6e; color: white; border-radius: 6px; padding: 6px 14px; font-weight: bold;
-}
-QPushButton#primary:disabled { background: #2a3139; color: #6b7480; }
 QLabel#presetTitle { font-size: 22px; font-weight: bold; color: #f4f4f4; }
 QLabel#badge { background: #6b4e00; color: #ffd36b; border-radius: 8px; padding: 2px 8px; }
 QLabel#conn { border-radius: 8px; padding: 2px 10px; font-weight: bold; }
@@ -866,9 +829,8 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def read_device(self) -> None:
-        if self.modified_slots() and QMessageBox.question(
-                self, "Leer pedalera", "Hay cambios sin guardar. ¿Descartarlos y leer la pedalera?") \
-                != QMessageBox.Yes:
+        if self.modified_slots() and not dialogs.ask(
+                self, "Leer pedalera", "Hay cambios sin guardar. ¿Descartarlos y leer la pedalera?"):
             return
 
         def done(bank: Bank) -> None:
@@ -906,9 +868,9 @@ class MainWindow(QMainWindow):
         if not slots:
             return
         names = ", ".join(slot_name(s) for s in slots)
-        if confirm and len(slots) > 1 and QMessageBox.question(
+        if confirm and len(slots) > 1 and not dialogs.ask(
                 self, "Guardar en la pedalera",
-                f"Se sobrescribirán en la pedalera: {names}\n¿Continuar?") != QMessageBox.Yes:
+                f"Se sobrescribirán en la pedalera: {names}\n¿Continuar?"):
             return
 
         def done(result) -> None:
@@ -939,11 +901,10 @@ class MainWindow(QMainWindow):
     # live audition -----------------------------------------------------------------
 
     def _live_toggled(self, on: bool) -> None:
-        if on and QMessageBox.question(
+        if on and not dialogs.ask(
                 self, "Escucha en vivo",
                 "Cada cambio se guardará en la memoria de la pedalera y se activará el preset para que lo "
-                "oigas al momento.\nAntes del primer cambio se hace un backup automático.\n\n¿Activar?") \
-                != QMessageBox.Yes:
+                "oigas al momento.\nAntes del primer cambio se hace un backup automático.\n\n¿Activar?"):
             self.live_action.setChecked(False)
             return
         if on:
@@ -1061,8 +1022,8 @@ class MainWindow(QMainWindow):
         self._restore_factory(list(range(first, first + 4)))
 
     def factory_all(self) -> None:
-        if QMessageBox.question(self, "Fábrica", "¿Cargar en el editor los 36 presets de fábrica?\n"
-                                "La pedalera no cambia hasta que pulses «Guardar todo».") == QMessageBox.Yes:
+        if dialogs.ask(self, "Fábrica", "¿Cargar en el editor los 36 presets de fábrica?\n"
+                                "La pedalera no cambia hasta que pulses «Guardar todo»."):
             self._restore_factory(list(range(SLOTS)))
 
     def _template_menu(self) -> QMenu:
@@ -1085,6 +1046,18 @@ class MainWindow(QMainWindow):
         self._set_local(self.current, preset)
         self.statusBar().showMessage(f"Preset «{name}» creado con IA en {slot_name(self.current)}. "
                                      "Escúchalo (o activa «Escucha en vivo») y pulsa «Guardar preset».", 8000)
+
+    def apply_generated_bank(self, bank: int, bank_name: str, items: list) -> None:
+        self._push_undo()
+        for i, (preset, name, _) in enumerate(items):
+            slot = bank * 4 + i
+            self.local.presets[slot] = preset.copy()
+            self.aliases.set_preset(slot, name)
+        if bank_name:
+            self.aliases.set_bank(bank, bank_name)
+        self.refresh()
+        self._schedule_live()
+        self.statusBar().showMessage(f"Banco {bank + 1} creado con IA. Escúchalo y pulsa «Guardar todo».", 8000)
 
     def run_job(self, fn, on_done, label: str) -> bool:
         """For dialogs: run fn(dev, report) in the background."""
@@ -1194,9 +1167,8 @@ class MainWindow(QMainWindow):
             return
         bank = self.current // 4
         items = items[:4]
-        if QMessageBox.question(self, "Importar banco", f"¿Reemplazar los presets {bank + 1}A–{bank + 1}"
-                                f"{'ABCD'[len(items) - 1]} del editor con «{title or Path(path).stem}»?") \
-                != QMessageBox.Yes:
+        if not dialogs.ask(self, "Importar banco", f"¿Reemplazar los presets {bank + 1}A–{bank + 1}"
+                                f"{'ABCD'[len(items) - 1]} del editor con «{title or Path(path).stem}»?"):
             return
         self._push_undo()
         for i, (preset, name) in enumerate(items):
@@ -1223,9 +1195,8 @@ class MainWindow(QMainWindow):
                           f"Backups automáticos en {library.BACKUP_DIR}")
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API
-        if self.modified_slots() and QMessageBox.question(
-                self, "Salir", "Hay presets modificados sin guardar en la pedalera. ¿Salir igualmente?") \
-                != QMessageBox.Yes:
+        if self.modified_slots() and not dialogs.ask(
+                self, "Salir", "Hay presets modificados sin guardar en la pedalera. ¿Salir igualmente?"):
             event.ignore()
             return
         self.pool.waitForDone(10000)
@@ -1252,7 +1223,7 @@ def main() -> int:
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Tank-G Control Center")
     app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
+    app.setStyleSheet(theme.QSS + STYLE)
     icon = library.PROJECT_ROOT / "packaging/icon.png"
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))

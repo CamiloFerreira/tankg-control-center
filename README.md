@@ -100,7 +100,8 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
 - **✨ Crear con IA** (cabecera del preset o Ctrl+K): describes el sonido con tus palabras
   («crunch tipo AC/DC», «limpio con chorus de los 80», «solo de Gilmour») y una IA rellena todos
   los controles, nombra el preset y explica sus decisiones. Queda en el editor para escucharlo
-  antes de guardarlo. Dos formas de conectar:
+  antes de guardarlo. Puedes crear **solo el preset seleccionado** o el **banco completo** (4
+  presets coherentes A–D con nombre de banco). Dos formas de conectar:
   - **Navegador (gratis, sin clave):** copia las instrucciones y abre Claude, ChatGPT o Gemini;
     pegas en el chat, copias la respuesta y la app la detecta sola en el portapapeles.
   - **Clave de API (automático):** Claude (Anthropic), ChatGPT (OpenAI) o un servidor compatible

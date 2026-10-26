@@ -94,6 +94,23 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
+BANK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "bank_name": {"type": "string", "description": "Nombre corto del banco (máx. 16 caracteres)"},
+        "presets": {"type": "array", "items": SCHEMA, "minItems": 4, "maxItems": 4,
+                    "description": "Exactamente 4 presets, en orden A, B, C, D"},
+    },
+    "required": ["bank_name", "presets"],
+    "additionalProperties": False,
+}
+
+BANK_INSTRUCTIONS = ("Crea un BANCO de 4 presets (A, B, C, D) coherentes entre sí para esa descripción, "
+                     "pensados para usarse juntos en una misma canción o estilo. Si la descripción no dice "
+                     "otra cosa, sigue una progresión útil: A base limpia o suave, B crunch o variación, "
+                     "C rítmica con más ganancia, D solo (más volumen, delay). Da a cada preset un color de "
+                     "LED distinto y un nombre que lo diferencie.")
+
 SYSTEM = f"""Eres un ingeniero de sonido experto que programa presets para la pedalera de guitarra
 M-VAVE Tank-G. Devuelves SIEMPRE el preset llamando a la herramienta/esquema indicado.
 
@@ -188,13 +205,14 @@ def _post(url: str, headers: dict, body: dict, timeout: float = 120) -> dict:
         raise AIError("El servicio de IA tardó demasiado en responder.") from e
 
 
-def _ask_claude(cfg: AIConfig, prompt: str) -> dict:
+def _ask_claude(cfg: AIConfig, prompt: str, schema: dict = SCHEMA) -> dict:
+    tool = "crear_banco" if schema is BANK_SCHEMA else "crear_preset"
     data = _post(f"{cfg.base_url}/v1/messages",
                  {"x-api-key": cfg.api_key, "anthropic-version": "2023-06-01"},
-                 {"model": cfg.model, "max_tokens": 2048, "system": SYSTEM,
-                  "tools": [{"name": "crear_preset", "description": "Devuelve el preset de la Tank-G",
-                             "input_schema": SCHEMA}],
-                  "tool_choice": {"type": "tool", "name": "crear_preset"},
+                 {"model": cfg.model, "max_tokens": 8192 if schema is BANK_SCHEMA else 2048, "system": SYSTEM,
+                  "tools": [{"name": tool, "description": "Devuelve el resultado para la Tank-G",
+                             "input_schema": schema}],
+                  "tool_choice": {"type": "tool", "name": tool},
                   "messages": [{"role": "user", "content": prompt}]})
     for block in data.get("content", []):
         if block.get("type") == "tool_use":
@@ -210,20 +228,22 @@ def _without_limits(schema):
     return schema
 
 
-def _ask_openai(cfg: AIConfig, prompt: str, strict: bool = True) -> dict:
+def _ask_openai(cfg: AIConfig, prompt: str, strict: bool = True, schema: dict = SCHEMA) -> dict:
     headers = {"authorization": f"Bearer {cfg.api_key}"} if cfg.api_key else {}
-    fmt = {"type": "json_schema", "json_schema": {"name": "preset", "schema": _without_limits(SCHEMA),
+    fmt = {"type": "json_schema", "json_schema": {"name": "preset", "schema": _without_limits(schema),
                                                     "strict": True}} \
         if strict else {"type": "json_object"}
     body = {"model": cfg.model, "response_format": fmt,
             "messages": [{"role": "system", "content": SYSTEM + ("" if strict else
-                          "\nResponde solo con un objeto JSON con estas claves: " + ", ".join(SCHEMA["required"]))},
+                          "\nResponde solo con un objeto JSON con estas claves: " + ", ".join(schema["required"])
+                          + ("; cada elemento de presets con: " + ", ".join(SCHEMA["required"])
+                             if schema is BANK_SCHEMA else ""))},
                          {"role": "user", "content": prompt}]}
     try:
         data = _post(f"{cfg.base_url}/chat/completions", headers, body)
     except AIError:
         if strict and cfg.provider == "compatible":   # many local servers lack json_schema
-            return _ask_openai(cfg, prompt, strict=False)
+            return _ask_openai(cfg, prompt, strict=False, schema=schema)
         raise
     try:
         return json.loads(data["choices"][0]["message"]["content"])
@@ -231,13 +251,7 @@ def _ask_openai(cfg: AIConfig, prompt: str, strict: bool = True) -> dict:
         raise AIError("La respuesta del modelo no era un preset JSON válido.") from e
 
 
-def generate(cfg: AIConfig, description: str, instrument: str, like: Preset | None = None) -> tuple[Preset, str, str]:
-    """Returns (preset, name, explanation)."""
-    cfg = cfg.resolved()
-    if cfg.provider != "compatible" and not cfg.api_key:
-        raise AIError(f"Falta la clave de API de {PROVIDERS[cfg.provider]['label']}.")
-    prompt = f"Instrumento: {instrument}\nSonido deseado: {description.strip()}"
-    design = _ask_claude(cfg, prompt) if cfg.provider == "claude" else _ask_openai(cfg, prompt)
+def _build(design: dict, like: Preset | None) -> tuple[Preset, str, str]:
     missing = [k for k in SCHEMA["required"] if k not in design]
     if missing:
         raise AIError(f"Al preset de la IA le faltan campos: {', '.join(missing)}")
@@ -246,6 +260,43 @@ def generate(cfg: AIConfig, description: str, instrument: str, like: Preset | No
     except (TypeError, ValueError) as e:
         raise AIError(f"Valores no válidos en la respuesta de la IA: {e}") from e
     return preset, str(design["name"])[:40], str(design["explanation"])
+
+
+def _build_bank(doc: dict, likes: list[Preset | None]) -> tuple[str, list[tuple[Preset, str, str]]]:
+    designs = doc.get("presets")
+    if not isinstance(designs, list) or len(designs) < 4:
+        raise AIError("La IA no devolvió los 4 presets del banco.")
+    return str(doc.get("bank_name") or "")[:24], [_build(d, like) for d, like in zip(designs[:4], likes)]
+
+
+def _checked(cfg: AIConfig) -> AIConfig:
+    cfg = cfg.resolved()
+    if cfg.provider != "compatible" and not cfg.api_key:
+        raise AIError(f"Falta la clave de API de {PROVIDERS[cfg.provider]['label']}.")
+    return cfg
+
+
+def _user_prompt(description: str, instrument: str, bank: bool) -> str:
+    return (f"Instrumento: {instrument}\nSonido deseado: {description.strip()}"
+            + (f"\n\n{BANK_INSTRUCTIONS}" if bank else ""))
+
+
+def generate(cfg: AIConfig, description: str, instrument: str, like: Preset | None = None) -> tuple[Preset, str, str]:
+    """One preset: returns (preset, name, explanation)."""
+    cfg = _checked(cfg)
+    prompt = _user_prompt(description, instrument, False)
+    design = _ask_claude(cfg, prompt) if cfg.provider == "claude" else _ask_openai(cfg, prompt)
+    return _build(design, like)
+
+
+def generate_bank(cfg: AIConfig, description: str, instrument: str,
+                  likes: list[Preset | None]) -> tuple[str, list[tuple[Preset, str, str]]]:
+    """A bank of 4: returns (bank name, [(preset, name, explanation)] for A..D)."""
+    cfg = _checked(cfg)
+    prompt = _user_prompt(description, instrument, True)
+    doc = _ask_claude(cfg, prompt, BANK_SCHEMA) if cfg.provider == "claude" else \
+        _ask_openai(cfg, prompt, schema=BANK_SCHEMA)
+    return _build_bank(doc, likes)
 
 
 def describe(preset: Preset) -> str:
@@ -262,22 +313,23 @@ def describe(preset: Preset) -> str:
             f"REVERB {onoff('rvb_on')}: DECAY {g('rvb_decay')} MIX {g('rvb_mix')}")
 
 
-def web_prompt(description: str, instrument: str) -> str:
+def web_prompt(description: str, instrument: str, bank: bool = False) -> str:
     """Self-contained prompt for a chat web page (browser mode)."""
     keys = ", ".join(f'"{k}"' for k in SCHEMA["required"])
-    return (f"{SYSTEM}\n\n"
-            f"Instrumento: {instrument}\nSonido deseado: {description.strip()}\n\n"
-            "Responde ÚNICAMENTE con un bloque de código JSON (```json ... ```) que tenga exactamente "
-            f"estas claves: {keys}. Tipos: amp_on/mod_on/dly_on/rvb_on booleanos; mod_type uno de "
+    shape = (f'un objeto con "bank_name" (texto) y "presets": una lista de EXACTAMENTE 4 objetos (A, B, C, D), '
+             f"cada uno con exactamente estas claves: {keys}") if bank else \
+        f"exactamente estas claves: {keys}"
+    return (f"{SYSTEM}\n\n{_user_prompt(description, instrument, bank)}\n\n"
+            "Responde ÚNICAMENTE con un bloque de código JSON (```json ... ```) que contenga "
+            f"{shape}. Tipos: amp_on/mod_on/dly_on/rvb_on booleanos; mod_type uno de "
             "chorus|phaser|tremolo; dly_type uno de analog|tape|dual; rvb_type uno de room|spring|cloud; "
             "led_color lista [R, G, B] de 0 a 255; el resto números enteros en los rangos indicados; "
             "name y explanation en español.")
 
 
-def parse_design_text(text: str) -> dict | None:
-    """Find the preset JSON in a chat answer (fenced or bare). None if there is none."""
+def _json_candidates(text: str) -> list:
     import re
-    candidates = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+    found = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
     start = text.find("{")
     if start >= 0:
         depth = 0
@@ -285,16 +337,37 @@ def parse_design_text(text: str) -> dict | None:
             depth += ch == "{"
             depth -= ch == "}"
             if depth == 0:
-                candidates.append(text[start:i + 1])
+                found.append(text[start:i + 1])
                 break
-    for c in candidates:
+    docs = []
+    for c in found:
         try:
-            design = json.loads(c)
+            docs.append(json.loads(c))
         except ValueError:
             continue
-        if isinstance(design, dict) and all(k in design for k in SCHEMA["required"]):
-            return design
+    return [d for d in docs if isinstance(d, dict)]
+
+
+def parse_bank_text(text: str) -> dict | None:
+    """Find a bank JSON ({"bank_name", "presets": [4]}) in a chat answer."""
+    for doc in _json_candidates(text):
+        presets = doc.get("presets")
+        if isinstance(presets, list) and len(presets) >= 4 and \
+                all(isinstance(p, dict) and all(k in p for k in SCHEMA["required"]) for p in presets[:4]):
+            return doc
     return None
+
+
+def bank_from_text(text: str, likes: list[Preset | None]) -> tuple[str, list[tuple[Preset, str, str]]]:
+    doc = parse_bank_text(text)
+    if doc is None:
+        raise AIError("No encontré los 4 presets del banco en el texto copiado. Copia la respuesta completa.")
+    return _build_bank(doc, likes)
+
+
+def parse_design_text(text: str) -> dict | None:
+    """Find the preset JSON in a chat answer (fenced or bare). None if there is none."""
+    return next((d for d in _json_candidates(text) if all(k in d for k in SCHEMA["required"])), None)
 
 
 def from_text(text: str, like: Preset | None = None) -> tuple[Preset, str, str]:

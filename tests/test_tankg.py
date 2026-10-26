@@ -349,3 +349,39 @@ def test_ai_web_mode_parsing():
     assert ai.parse_design_text("hola sin json") is None
     with pytest.raises(ai.AIError):
         ai.from_text('{"name": "incompleto"}')
+
+
+def _bank_doc():
+    designs = []
+    for i, amp in enumerate([0, 6, 5, 7]):
+        d = dict(DESIGN, name=f"P{i}", amp_type=amp)
+        designs.append(d)
+    return {"bank_name": "Rock", "presets": designs}
+
+
+def test_ai_bank_claude(monkeypatch):
+    from tankg import ai
+    seen = {}
+
+    def fake_post(url, headers, body, timeout=120):
+        seen.update(body=body)
+        return {"content": [{"type": "tool_use", "input": _bank_doc()}]}
+    monkeypatch.setattr(ai, "_post", fake_post)
+    likes = Bank.from_bytes(LIVE).presets[8:12]
+    name, items = ai.generate_bank(ai.AIConfig("claude", "k"), "rock", ai.INSTRUMENTS[0], likes)
+    assert name == "Rock" and [p.amp_name for p, _, _ in items] == ["J120_CL", "MS_GV2", "VAVE_DS", "J900_HV"]
+    assert seen["body"]["tool_choice"]["name"] == "crear_banco"
+    assert seen["body"]["tools"][0]["input_schema"]["properties"]["presets"]["minItems"] == 4
+
+
+def test_ai_bank_web_text():
+    import json as _json
+    from tankg import ai
+    prompt = ai.web_prompt("rock", ai.INSTRUMENTS[0], bank=True)
+    assert "bank_name" in prompt and "EXACTAMENTE 4" in prompt
+    text = "Aquí va:\n```json\n" + _json.dumps(_bank_doc()) + "\n```"
+    assert ai.parse_bank_text(text) is not None and ai.parse_design_text(text) is None
+    name, items = ai.bank_from_text(text, [None] * 4)
+    assert name == "Rock" and len(items) == 4
+    with pytest.raises(ai.AIError):
+        ai.bank_from_text(_json.dumps({"bank_name": "x", "presets": [DESIGN]}), [None] * 4)
