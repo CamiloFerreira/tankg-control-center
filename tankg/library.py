@@ -24,6 +24,7 @@ else:
     DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "tankg"
 BACKUP_DIR = DATA_DIR / "backups"
 ALIAS_FILE = DATA_DIR / "aliases.json"
+SETTINGS_FILE = DATA_DIR / "settings.json"
 FACTORY_CANDIDATES = [
     DATA_DIR / "factory.tgbank",
     PROJECT_ROOT / "research/factory/tankG_am4_preset.bin",
@@ -186,3 +187,30 @@ def load_set(path: str | Path) -> tuple[str | None, list[tuple[Preset, str | Non
     if not items:
         raise ValueError(f"{path}: no contiene presets")
     return doc.get("title") or None, items
+
+
+class Settings:
+    """Small persistent app settings (currently the manually chosen MIDI ports)."""
+
+    def __init__(self, path: Path | None = None):
+        self.path = path or SETTINGS_FILE
+        self.data: dict = {}
+        try:
+            self.data = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            pass
+
+    @property
+    def midi_ports(self) -> tuple[str, str] | None:
+        """(input name, output name) chosen by the user, or None for automatic detection."""
+        i, o = self.data.get("midi_in"), self.data.get("midi_out")
+        return (i, o) if i and o else None
+
+    def set_midi_ports(self, ports: tuple[str, str] | None) -> None:
+        if ports:
+            self.data["midi_in"], self.data["midi_out"] = ports
+        else:
+            self.data.pop("midi_in", None)
+            self.data.pop("midi_out", None)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self.data, indent=2, ensure_ascii=False) + "\n")

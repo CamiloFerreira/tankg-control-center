@@ -32,6 +32,10 @@ Una etiqueta `vX.Y.Z` subida a GitHub compila ambos y publica el release
 
 Datos (backups y nombres) en `%APPDATA%\tankg\`.
 
+Si no detecta la pedalera (el nombre del puerto MIDI varía entre equipos Windows): menú
+**Pedalera → Puerto MIDI…**, elige entrada y salida, «Probar» y «Guardar». Desde la línea de
+comandos: `TankG ports` lista los puertos y `TankG ports --in "NOMBRE" --out "NOMBRE"` los fija.
+
 ## Uso
 
 ```bash

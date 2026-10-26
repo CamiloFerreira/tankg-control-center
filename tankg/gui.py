@@ -38,7 +38,7 @@ QToolBar QToolButton:hover { background: #2a3139; }
 QToolBar QToolButton:checked { background: #1f6f6d; }
 QStatusBar { background: #1d2228; color: #aab; }
 QDialog, QMessageBox, QInputDialog { background: #1d2228; color: #e6e6e6; }
-QDialog QLabel, QMessageBox QLabel { color: #e6e6e6; }
+QDialog QLabel, QMessageBox QLabel, QDialog QRadioButton { color: #e6e6e6; }
 QDialog QPushButton, QMessageBox QPushButton {
     background: #2a3139; color: #e6e6e6; border-radius: 6px; padding: 6px 12px;
 }
@@ -650,6 +650,7 @@ class MainWindow(QMainWindow):
         self._action(m, "Backup de la pedalera", self.backup_device, "Ctrl+B")
         self._action(m, "Restaurar banco desde archivo...", self.restore_to_device)
         self._action(m, "Gestor de backups...", lambda: dialogs.BackupManager(self).exec())
+        self._action(m, "Puerto MIDI...", self.choose_midi_port)
         m.addSeparator()
         self._action(m, "Asistente de calibración...", lambda: dialogs.CalibrationWizard(self).exec())
         m = mb.addMenu("&Editar")
@@ -833,9 +834,18 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", msg)
         self.refresh()
 
+    def choose_midi_port(self) -> None:
+        if dialogs.MidiPortDialog(self).exec():
+            self.connected = False
+            self.device = None if not self.modified_slots() else self.device
+            self._poll_device()
+
     def _poll_device(self) -> None:
         was = self.connected
         self.connected = bool(find_devices())
+        if not self.connected and not self.statusBar().currentMessage():
+            self.statusBar().showMessage("No se detecta la Tank-G. Si está conectada, elige el puerto en "
+                                         "Pedalera → Puerto MIDI…")
         if self.connected != was:
             self.statusBar().showMessage("Tank-G conectada" if self.connected else "Tank-G desconectada", 4000)
             if self.connected and self.device is None:

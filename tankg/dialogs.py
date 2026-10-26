@@ -8,11 +8,12 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPlainTextEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QAbstractItemView, QApplication, QComboBox, QDialog, QFormLayout, QHBoxLayout, QHeaderView,
+    QLabel, QMessageBox, QPlainTextEdit, QPushButton, QRadioButton, QTableWidget, QTableWidgetItem,
+    QVBoxLayout,
 )
 
-from . import library
+from . import device, library
 from .model import FIELDS, OFF_COLOR, REC_LEN, Bank, slot_name
 
 BYTE_NAMES = {f.offset: f.label for f in FIELDS}
@@ -167,3 +168,96 @@ class CalibrationWizard(QDialog):
                 pass
             self.reference = bank
         self._read(done)
+
+
+class MidiPortDialog(QDialog):
+    """Choose the MIDI input/output ports by hand when automatic detection fails
+    (port names differ between Windows installations)."""
+
+    def __init__(self, main):
+        super().__init__(main)
+        self.main = main
+        self.settings = library.Settings()
+        self.setWindowTitle("Puerto MIDI")
+        self.resize(620, 300)
+        lay = QVBoxLayout(self)
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        self.auto = QRadioButton("Automático (buscar «USB Composite Device», «TANK», «M-VAVE»…)")
+        self.manual = QRadioButton("Elegir los puertos:")
+        lay.addWidget(self.auto)
+        lay.addWidget(self.manual)
+        form = QFormLayout()
+        self.in_combo = QComboBox()
+        self.out_combo = QComboBox()
+        form.addRow("Entrada (desde la pedalera)", self.in_combo)
+        form.addRow("Salida (hacia la pedalera)", self.out_combo)
+        lay.addLayout(form)
+        self.result = QLabel()
+        self.result.setWordWrap(True)
+        lay.addWidget(self.result)
+        row = QHBoxLayout()
+        for text, fn in [("Actualizar lista", self.populate), ("Probar", self.test),
+                         ("Guardar", self.save), ("Cancelar", self.reject)]:
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        lay.addLayout(row)
+        self.manual.toggled.connect(lambda on: (self.in_combo.setEnabled(on), self.out_combo.setEnabled(on)))
+        saved = self.settings.midi_ports
+        (self.manual if saved else self.auto).setChecked(True)
+        self.in_combo.setEnabled(bool(saved))
+        self.out_combo.setEnabled(bool(saved))
+        self.populate()
+
+    def populate(self) -> None:
+        try:
+            ins, outs = device.list_midi_ports()
+        except device.DeviceError as e:
+            self.status.setText(str(e))
+            ins, outs = [], []
+        else:
+            self.status.setText(f"{len(ins)} puerto(s) de entrada y {len(outs)} de salida. En Windows cierra "
+                                "M-EFCS: el puerto solo lo puede usar un programa a la vez.")
+        saved = self.settings.midi_ports or ("", "")
+        for combo, names, want in ((self.in_combo, ins, saved[0]), (self.out_combo, outs, saved[1])):
+            combo.clear()
+            combo.addItems(names)
+            pick = want if want in names else next((n for n in names if device._looks_like_tankg(n)), None)
+            if pick:
+                combo.setCurrentText(pick)
+
+    def _chosen(self) -> tuple[str, str] | None:
+        if self.auto.isChecked():
+            return None
+        if not self.in_combo.currentText() or not self.out_combo.currentText():
+            return None
+        return self.in_combo.currentText(), self.out_combo.currentText()
+
+    def test(self) -> None:
+        if self.main.busy:
+            self.result.setText("Hay una operación en curso; prueba en unos segundos.")
+            return
+        # () = automatic detection, ignoring any saved manual choice
+        devs = device.find_devices(self._chosen() or ("", "")) if self.manual.isChecked() \
+            else device.find_devices(())
+        if not devs:
+            self.result.setText("✗ No hay ningún puerto que coincida.")
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            dev = device.TankG.open(devs[0])
+            dev.close()
+            self.result.setText(f"✓ Tank-G encontrada en «{devs[0].address}»: banco de 36 presets leído.")
+        except device.DeviceError as e:
+            self.result.setText(f"✗ {e}")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def save(self) -> None:
+        if self.manual.isChecked() and self._chosen() is None:
+            QMessageBox.information(self, "Puerto MIDI", "Elige un puerto de entrada y uno de salida.")
+            return
+        self.settings.set_midi_ports(self._chosen())
+        self.accept()

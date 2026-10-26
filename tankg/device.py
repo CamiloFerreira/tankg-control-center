@@ -72,32 +72,67 @@ def _port_key(name: str) -> str:
     return re.sub(r"\s+\d+(:\d+)?$", "", name).strip()
 
 
-def _find_rtmidi() -> list[DeviceInfo]:
+PORT_HINTS = ("usb composite device", "tank", "m-vave", "mvave", "jieli")
+
+
+def list_midi_ports() -> tuple[list[str], list[str]]:
+    """(input names, output names) seen by python-rtmidi. Raises DeviceError if unavailable."""
     if rtmidi is None:
-        return []
+        raise DeviceError("python-rtmidi no está disponible: no se pueden listar puertos MIDI.")
     try:
         midi_out, midi_in = rtmidi.MidiOut(), rtmidi.MidiIn()
         outs, ins = midi_out.get_ports(), midi_in.get_ports()
         midi_out.delete()
         midi_in.delete()
-    except Exception:  # noqa: BLE001 - a broken MIDI subsystem means "no device"
+    except Exception as e:  # noqa: BLE001 - rtmidi raises its own error types
+        raise DeviceError(f"No se pudo consultar el sistema MIDI: {e}") from e
+    return ins, outs
+
+
+def _looks_like_tankg(name: str) -> bool:
+    low = name.lower()
+    return any(h in low for h in PORT_HINTS)
+
+
+def _find_rtmidi() -> list[DeviceInfo]:
+    try:
+        ins, outs = list_midi_ports()
+    except DeviceError:
         return []
     found = []
     used_in: set[int] = set()
     for oi, oname in enumerate(outs):
-        if PORT_NAME not in oname:
+        if not _looks_like_tankg(oname):
             continue
         key = _port_key(oname)
         ii = next((i for i, n in enumerate(ins) if i not in used_in and _port_key(n) == key), None)
         if ii is None:
-            ii = next((i for i, n in enumerate(ins) if i not in used_in and PORT_NAME in n), None)
+            ii = next((i for i, n in enumerate(ins) if i not in used_in and _looks_like_tankg(n)), None)
         if ii is not None:
             used_in.add(ii)
             found.append(DeviceInfo("rtmidi", PORT_NAME, oname, oi, ii))
     return found
 
 
-def find_devices() -> list[DeviceInfo]:
+def _find_selected(ports: tuple[str, str]) -> list[DeviceInfo]:
+    """The ports the user picked in "Puerto MIDI…"; empty when they are not present."""
+    try:
+        ins, outs = list_midi_ports()
+    except DeviceError:
+        return []
+    in_name, out_name = ports
+    if in_name in ins and out_name in outs:
+        return [DeviceInfo("rtmidi", "Puerto elegido", out_name, outs.index(out_name), ins.index(in_name))]
+    return []
+
+
+def find_devices(ports: tuple[str, str] | None = None) -> list[DeviceInfo]:
+    """Manual selection (argument or saved setting) wins; otherwise automatic detection."""
+    if ports is None:
+        from .library import Settings
+        ports = Settings().midi_ports
+    if ports:
+        return _find_selected(ports)
     if sys.platform.startswith("linux"):
         devs = _find_rawmidi()
         if devs:

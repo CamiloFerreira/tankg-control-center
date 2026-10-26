@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from . import library
-from .device import DeviceError, TankG, find_devices
+from .device import DeviceError, TankG, find_devices, list_midi_ports
 from .model import AMP_MODELS, CAB_MODELS, FIELDS, Bank, parse_slot, slot_name
 
 
@@ -36,6 +36,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="tankg", description="M-VAVE Tank-G preset manager")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("info", help="detectar la pedalera")
+    p = sub.add_parser("ports", help="listar puertos MIDI y elegir cuáles usar")
+    p.add_argument("--in", dest="port_in", help="nombre exacto del puerto de entrada")
+    p.add_argument("--out", dest="port_out", help="nombre exacto del puerto de salida")
+    p.add_argument("--auto", action="store_true", help="volver a la detección automática")
     p = sub.add_parser("list", help="listar presets (de la pedalera o de un archivo)")
     p.add_argument("--file")
     p = sub.add_parser("backup", help="guardar el banco completo")
@@ -71,6 +75,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if a.cmd == "list" and a.file:
             print_bank(library.load_bank(a.file))
+            return 0
+        if a.cmd == "ports":
+            settings = library.Settings()
+            if a.auto:
+                settings.set_midi_ports(None)
+            elif a.port_in or a.port_out:
+                if not (a.port_in and a.port_out):
+                    raise ValueError("indica --in y --out")
+                settings.set_midi_ports((a.port_in, a.port_out))
+            ins, outs = list_midi_ports()
+            print("Entradas:\n" + "\n".join(f"  {n}" for n in ins))
+            print("Salidas:\n" + "\n".join(f"  {n}" for n in outs))
+            sel = settings.midi_ports
+            print("Selección:", f"entrada «{sel[0]}», salida «{sel[1]}»" if sel else "automática")
             return 0
         if a.cmd == "info":
             devs = find_devices()

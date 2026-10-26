@@ -228,3 +228,25 @@ def test_templates_valid():
         p = templates.build(name, like)
         assert len(p.to_bytes()) == 21
     assert templates.build("Bajo").cab_name == "HIFI_YAMAHA"
+
+
+def test_manual_port_selection(monkeypatch, tmp_path):
+    from tankg import device
+    monkeypatch.setattr(_FakeRt, "outs", ["Microsoft GS Wavetable Synth 0", "Mi Pedal Raro 1"])
+    monkeypatch.setattr(_FakeRt, "ins", ["Mi Pedal Raro 0"])
+    monkeypatch.setattr(device, "rtmidi", _FakeRt)
+    monkeypatch.setattr(device.sys, "platform", "win32")
+    monkeypatch.setattr(library, "SETTINGS_FILE", tmp_path / "settings.json")
+    assert device.find_devices() == []                       # unknown name: auto finds nothing
+    library.Settings().set_midi_ports(("Mi Pedal Raro 0", "Mi Pedal Raro 1"))
+    devs = device.find_devices()
+    assert [(d.in_port, d.out_port) for d in devs] == [(0, 1)]
+    library.Settings().set_midi_ports(None)
+    assert device.find_devices() == []
+
+
+def test_port_hints():
+    from tankg import device
+    assert device._looks_like_tankg("MIDIIN2 (TANK-G)")
+    assert device._looks_like_tankg("M-VAVE MIDI 1")
+    assert not device._looks_like_tankg("Microsoft GS Wavetable Synth")
