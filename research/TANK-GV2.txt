@@ -1,0 +1,47 @@
+﻿-----------TANK-GV2_2026_01_31 v97---------------
+
+CN：支持AM4格式的文件用于AMP模块
+
+EN：Supports AM4 format files for AMP modules
+
+
+-----------TANK-GV2_2024_12_28 v91---------------
+On December 31, 2024, the ANN software, EFCS, and videos will be updated
+
+1.Time-Frequency AI NATEC Noise Reduction Technology: Combines time-frequency analysis with AI intelligent noise reduction to precisely eliminate noise while preserving audio details, delivering an ultra-clear listening experience.
+
+2.Supports AM3 Psychoacoustic AI Model: Simulates human ear perception to optimize the audio spectrum and dynamic range, enhancing the naturalness and clarity of sound.
+
+
+3.System-Level Optimization for 40% Improvement: Through innovative resource management, overall performance is improved by 40%, effectively solving stuttering issues and ensuring a smooth and stable user experience.
+
+
+4.Optimization of Sampling Rate Fluctuations in USB Recording and Playback: Successfully eliminates sampling rate jitter during USB recording and playback, ensuring precise and stable audio data transmission.
+
+-----------TANK-GV2_2024_04_20 v53---------------
+1、Fixed some bugs
+
+-----------TANK-GV2_2024_04_19 v52---------------
+1、Fixed some bugs
+
+-----------TANK-GV2_2024_04_16 v50---------------
+1、Improved the popping sound of switching tones
+2、Accelerated preset switching speed
+3、Fixed some bugs
+
+-----------TANK-GV2_2024_03_13 v46---------------
+
+1. Add a Computer Loopback switch, which can be turned on and off in EFCS V1.2 software.
+
+2. Add chocolate and cube turner (&pro) Manufacturer control.
+
+3. Add MIDI control mode. PC code corresponds to the control of 36 presets , while CC code can independently control each module (such as reverberation module, delay module, etc.) whether in live mode or preset mode.
+PC CODE:PC00-PC35(chocolate Program A&B)
+CC CODE:CC0 0-CC4 0 (chocolate Program C) 
+
+4. Optimized some bugs.
+
+-------------------------------------------
+
+The firmware update video is as follows:
+https://www.youtube.com/watch?v=H1qCBhDqy9g
