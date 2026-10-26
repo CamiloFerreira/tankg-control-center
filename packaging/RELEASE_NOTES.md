@@ -16,20 +16,16 @@ No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 - Linux: `sha256sum -c SHA256SUMS --ignore-missing`
 - Windows (PowerShell): `Get-FileHash .\TankG-windows-x64.exe` y compara con la línea de `SHA256SUMS`.
 
-## Firma (Windows)
-
-El `.exe` está firmado con un certificado **autofirmado** («Camilo Ferreira (Tank-G Control
-Center)», huella SHA-256 `A3:45:7F:B8:BD:DB:C3:93:31:75:1F:FE:60:57:F4:50:28:27:4E:98:F2:79:89:44:20:41:B4:27:BD:0F:0A:91`).
-Windows no lo reconoce por sí solo; para que lo muestre como editor conocido en tus equipos,
-instala `tankg-codesign.cer` (ver README, sección «Firma»). En otros PCs se comporta como un
-ejecutable sin firmar.
-
 ## Funciones
 
 Leer y guardar los 36 presets, editor con el aspecto del panel de la pedalera, nombres de presets y
 bancos, color del LED, plantillas, restaurar de fábrica, exportar/importar presets y bancos,
-backups automáticos antes de cada escritura con verificación por relectura, escucha en vivo y
-asistente de calibración.
+backups automáticos antes de cada escritura con verificación por relectura, escucha en vivo,
+asistente de calibración y selección manual del puerto MIDI.
+
+**Crear con IA:** describe el sonido y la IA crea el preset o el banco completo (A–D). Funciona en
+el navegador con tu cuenta de Claude, ChatGPT o Gemini (gratis, sin clave) o automático con clave
+de API (Claude, OpenAI u Ollama local).
 
 AMP y CAB están verificados; la posición del resto de controles está deducida del manual (ver
 `research/FINDINGS.md`).

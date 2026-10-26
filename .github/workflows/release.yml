@@ -73,10 +73,31 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ secrets.WINDOWS_PFX_BASE64 != '' }}
         run: |
           chmod +x assets/TankG-linux-x86_64
-          cp packaging/tankg-codesign.cer assets/
-          (cd assets && sha256sum TankG-* tankg-codesign.cer > SHA256SUMS && cat SHA256SUMS)
+          cp packaging/RELEASE_NOTES.md notes.md
+          if [ "$SIGNED" = "true" ]; then
+            cp packaging/tankg-codesign.cer assets/
+            cat >> notes.md <<'NOTES'
+
+          ## Firma (Windows)
+
+          El `.exe` está firmado con un certificado **autofirmado** («Camilo Ferreira (Tank-G Control Center)»).
+          Para que tus equipos lo reconozcan instala `tankg-codesign.cer` (README, «Firma y verificación»);
+          en otros PCs se comporta como un ejecutable sin firmar.
+          NOTES
+          else
+            cat >> notes.md <<'NOTES'
+
+          ## Firma
+
+          Esta versión **no está firmada**: Windows SmartScreen puede avisar («Más información» → «Ejecutar
+          de todas formas»). Comprueba la descarga con `SHA256SUMS`.
+          NOTES
+          fi
+          sed -i 's/^          //' notes.md
+          (cd assets && sha256sum * > SHA256SUMS && cat SHA256SUMS)
           gh release create "$GITHUB_REF_NAME" assets/* \
             --title "Tank-G Control Center $GITHUB_REF_NAME" \
-            --notes-file packaging/RELEASE_NOTES.md
+            --notes-file notes.md
