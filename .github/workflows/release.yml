@@ -60,8 +60,35 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
 
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and sign the APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          TANKG_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          # Without the release key the APK would get a new signature that cannot update
+          # installed copies, so it is left out of the release instead.
+          if [ -z "$KEYSTORE_BASE64" ]; then echo "No ANDROID_KEYSTORE_BASE64 secret: skipping the APK"; exit 0; fi
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;35.0.0" > /dev/null
+          export TANKG_KEYSTORE="$RUNNER_TEMP/release.jks"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$TANKG_KEYSTORE"
+          ref="${GITHUB_REF_NAME#v}"
+          if [[ "$ref" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then export TANKG_VERSION="$ref"; fi
+          android/build.sh
+          rm "$TANKG_KEYSTORE"
+          mv dist/TankG.apk TankG-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TankG-android.apk
+          path: TankG-android.apk
+          if-no-files-found: ignore
+
   release:
-    needs: build
+    needs: [build, android]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:

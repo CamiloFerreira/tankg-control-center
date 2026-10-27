@@ -13,7 +13,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 def test_web_data_is_current():
     import export_web
-    assert export_web.OUT.read_text(encoding="utf-8") == export_web.render(), \
+    current = export_web.OUT.read_text(encoding="utf-8").replace("\r\n", "\n")   # Windows checkouts may use CRLF
+    assert current == export_web.render(), \
         "web/js/data.js desactualizado: ejecuta tools/export_web.py"
 
 
