@@ -181,6 +181,53 @@ const score = name => {
   return PORT_HINTS.some(h => n.includes(h)) ? 2 : WEAK_HINTS.some(h => n.includes(h)) ? 1 : 0;
 };
 
+/** Opens the pedal with whatever this platform offers: the Android app's native bridge or Web MIDI. */
+export const openMidi = () => (globalThis.AndroidMidi ? openAndroidMidi() : openWebMidi());
+
+/** Object whose onstatechange({port: {state, name}}) fires when MIDI devices come and go. */
+export function midiAccess() {
+  if (globalThis.AndroidMidi) return Promise.resolve(androidAccess);
+  return navigator.requestMIDIAccess ? navigator.requestMIDIAccess({ sysex: true }) : Promise.reject(new Error("no MIDI"));
+}
+
+// Android app: MainActivity exposes `AndroidMidi` (android.media.midi) and calls back into
+// these globals with hex strings; complete SysEx frames only.
+const androidAccess = { onstatechange: null };
+let androidIn = null;
+const androidOpens = new Map();
+globalThis.__midiIn = hex => androidIn?.(fromHex(hex));
+globalThis.__midiState = (state, name) => androidAccess.onstatechange?.({ port: { state, name } });
+globalThis.__midiOpened = (id, ok, error) => { androidOpens.get(id)?.(ok ? null : error || "error"); androidOpens.delete(id); };
+
+function androidOpen(id) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { androidOpens.delete(id); reject(new DeviceError("La pedalera no respondió al abrirla.")); }, 5000);
+    androidOpens.set(id, err => { clearTimeout(timer); err ? reject(new DeviceError(`No se pudo abrir el dispositivo MIDI: ${err}`)) : resolve(); });
+    globalThis.AndroidMidi.open(id);
+  });
+}
+
+async function openAndroidMidi() {
+  const devices = JSON.parse(globalThis.AndroidMidi.list()).sort((a, b) => score(b.name) - score(a.name));
+  if (!devices.length) throw new DeviceError("No se ve ningún dispositivo MIDI. ¿La Tank-G está conectada por USB-OTG y encendida?");
+  let error;
+  for (const d of devices) {
+    try {
+      await androidOpen(d.id);
+      const dev = new TankG({
+        send: data => globalThis.AndroidMidi.send(toHex(data)),
+        onMessage: f => { androidIn = f; },
+        close: () => { androidIn = null; globalThis.AndroidMidi.close(); },
+      });
+      dev.bank = await dev.readBank(2);
+      dev.portName = d.name;
+      dev.access = androidAccess;
+      return dev;
+    } catch (e) { globalThis.AndroidMidi.close(); error = e; }
+  }
+  throw error;
+}
+
 /** Web MIDI (Chrome on Android over USB-OTG, Chrome/Edge on desktop). */
 export async function openWebMidi() {
   if (!navigator.requestMIDIAccess)

@@ -122,6 +122,24 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
 - La conexión y desconexión se detectan solas. La pedalera solo se abre durante cada
   operación, así que no bloquea a PipeWire, a un DAW ni a M-EFCS.
 
+## Android (teléfono y tablet)
+
+App para Android 6+ con la pedalera conectada por **USB-OTG**: misma pedalera virtual que en el PC
+(faders, módulos, interruptores A–D que activan el preset), biblioteca de sonidos, subida con
+progreso y verificación, backups (se descargan como `.tgbank` en Descargas) y modo demo.
+Se adapta sola: en teléfono, vista compacta; en tablet o pantalla grande, la disposición del
+escritorio con la lista de los 36 presets al lado (menú ⋮ → Vista para forzarla).
+
+```bash
+android/build.sh          # dist/TankG.apk (release)   — necesita Android SDK en ~/Android/Sdk
+android/build.sh debug    # dist/TankG-debug.apk (inspeccionable con chrome://inspect)
+```
+
+Se compila sin Gradle (aapt2 + javac + d8 + apksigner). La clave de firma se crea la primera vez en
+`~/.local/share/tankg/android-release.jks` (+ `.pass`): **guárdala**, Android solo instala
+actualizaciones firmadas con la misma clave. La interfaz es la misma que `web/` (también funciona
+en Chrome con Web MIDI); los datos de presets se generan con `tools/export_web.py`.
+
 ## No soportado (todavía)
 
 Funciones de M-EFCS cuyo protocolo para Tank-G no está verificado y que no se implementan para

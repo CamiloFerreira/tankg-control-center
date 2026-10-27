@@ -3,21 +3,23 @@
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
 import { AMP_MODELS, CAB_MODELS, FIELDS, LIBRARY } from "./data.js";
-import { Bank, DeviceError, SLOTS, TankG, fakePedal, fromHex, openWebMidi, slotName, toHex } from "./protocol.js";
+import { Bank, DeviceError, SLOTS, TankG, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 
 const $ = id => document.getElementById(id);
 const F = Object.fromEntries(FIELDS.map(f => [f.key, f]));
-const SECTIONS = [
-  { title: "AMP", c: "--amp", sw: "amp_on", keys: ["amp_type", "gain", "treble", "middle", "bass", "volume"], wide: true },
-  { title: "NOISE GATE", c: "--gate", keys: ["gate"] },
-  { title: "IR CAB", c: "--gate", keys: ["cab"] },
-  { title: "MOD", c: "--mod", sw: "mod_on", keys: ["mod_fx", "mod_speed"] },
-  { title: "DELAY", c: "--dly", sw: "dly_on", keys: ["dly_mix", "dly_time"] },
-  { title: "REVERB", c: "--rvb", sw: "rvb_on", keys: ["rvb_decay", "rvb_mix"] },
+// Same order and colours as the desktop pedal panel.
+const MODULES = [
+  { title: "GATE", cls: "m-gate", c: "--gate", faders: ["gate"] },
+  { title: "AMP", cls: "m-amp", c: "--amp", sw: "amp_on", select: "amp_type", faders: ["gain", "treble", "middle", "bass", "volume"] },
+  { title: "MOD", cls: "m-mod", c: "--mod", sw: "mod_on", faders: ["mod_fx", "mod_speed"] },
+  { title: "DELAY", cls: "m-dly", c: "--dly", sw: "dly_on", faders: ["dly_mix", "dly_time"] },
+  { title: "REVERB", cls: "m-rvb", c: "--rvb", sw: "rvb_on", faders: ["rvb_decay", "rvb_mix"] },
+  { title: "CAB", cls: "m-cab", c: "--gate", select: "cab", faders: [] },
 ];
 const DEMO_BANKS = ["Guitarra eléctrica", "Metallica", "Iron Maiden", "AC/DC", "Blind Guardian", "Korn",
   "Bajo limpio", "Guitarra clásica (nylon)", "Strato: limpios"];
 
+const ANDROID = !!globalThis.AndroidMidi;   // running inside the APK (native MIDI bridge)
 const S = { dev: null, demo: false, device: null, local: null, current: 0, undo: [], busy: false,
   backupDone: false, wanted: false, libBank: null, libPick: 0 };
 
@@ -62,47 +64,90 @@ function toast(text, ms = 3500) {
 
 // rendering ---------------------------------------------------------------------------------
 
-function buildSections() {
-  const root = $("sections");
+function buildModules() {
+  const root = $("modules");
   root.innerHTML = "";
-  for (const sec of SECTIONS) {
+  for (const m of MODULES) {
     const el = document.createElement("div");
-    el.className = "section" + (sec.wide ? " wide" : "");
-    el.style.setProperty("--c", `var(${sec.c})`);
-    el.innerHTML = `<div class="sec-head"><b>${sec.title}</b></div>`;
-    if (sec.sw) {
+    el.className = `module ${m.cls}`;
+    el.style.setProperty("--c", `var(${m.c})`);
+    el.innerHTML = `<div class="mhead"><b>${m.title}</b></div>`;
+    if (m.sw) {
       const b = document.createElement("button");
       b.className = "switch";
-      b.dataset.key = sec.sw;
-      b.onclick = () => { pushUndo(); setField(sec.sw, get(sec.sw) ? 0 : 1); };
+      b.dataset.key = m.sw;
+      b.setAttribute("aria-label", `${m.title} encendido/apagado`);
+      b.onclick = () => { pushUndo(); setField(m.sw, get(m.sw) ? 0 : 1); };
       el.firstChild.append(b);
     }
-    for (const key of sec.keys) {
-      const f = F[key];
+    if (m.select) {
+      const names = m.select === "amp_type" ? AMP_MODELS : CAB_MODELS;
+      const wrap = document.createElement("div");
+      wrap.className = m.select === "cab" ? "mbody" : "mselect";
+      wrap.innerHTML = (m.select === "cab" ? '<span class="led"></span>' : "") + `<select data-key="${m.select}" aria-label="${m.title}">` +
+        names.map((n, i) => `<option value="${i}">${m.select === "cab" ? (i ? `${i}. ${n}` : n) : `${i + 1}. ${n}`}</option>`).join("") +
+        "</select>";
+      wrap.querySelector("select").onchange = e => { pushUndo(); setField(m.select, +e.target.value); };
+      el.append(wrap);
+    }
+    if (m.faders.length) {
       const row = document.createElement("div");
-      row.className = "ctl";
-      if (key === "amp_type" || key === "cab") {
-        const names = key === "amp_type" ? AMP_MODELS : CAB_MODELS;
-        row.innerHTML = `<label>${key === "amp_type" ? "TYPE" : "MODELO"}</label><select data-key="${key}">` +
-          names.map((n, i) => `<option value="${i}">${key === "cab" && i === 0 ? n : `${i + (key === "cab" ? 0 : 1)}. ${n}`}</option>`).join("") +
-          "</select>";
-        row.querySelector("select").onchange = e => { pushUndo(); setField(key, +e.target.value); };
-      } else {
-        row.innerHTML = `<label>${f.label}<small></small></label><input type="range" min="0" max="${f.max}" data-key="${key}"><output></output>`;
-        const input = row.querySelector("input");
-        let dragging = false;
-        input.oninput = () => {
-          if (!dragging) { pushUndo(); dragging = true; }
-          setField(key, +input.value, false);
-          row.querySelector("output").textContent = input.value;
-          row.querySelector("small").textContent = zoneOf(f, +input.value);
-        };
-        input.onchange = () => { dragging = false; render(); };
-      }
+      row.className = "faders";
+      for (const key of m.faders) row.append(makeFader(key));
       el.append(row);
     }
     root.append(el);
   }
+}
+
+/** Vertical fader. Dragging is relative (like a mixing desk): a tap never jumps the value. */
+function makeFader(key) {
+  const f = F[key];
+  const el = document.createElement("div");
+  el.className = "fader";
+  el.dataset.fader = key;
+  el.innerHTML = `<span class="led"></span><label>${f.label}</label>
+    <div class="track" tabindex="0" role="slider" aria-label="${f.label}" aria-valuemin="0" aria-valuemax="${f.max}">
+      <div class="fill"></div><div class="thumb"></div></div><output></output><small class="zone"></small>`;
+  const track = el.querySelector(".track");
+  let start = null;
+  const apply = v => {
+    v = Math.max(0, Math.min(f.max, Math.round(v)));
+    if (v !== get(key)) { setField(key, v, false); paintFader(el, v); }
+  };
+  track.onpointerdown = e => {
+    track.setPointerCapture(e.pointerId);
+    pushUndo();
+    start = { y: e.clientY, v: get(key), h: track.clientHeight };
+    track.classList.add("active");
+    e.preventDefault();
+  };
+  track.onpointermove = e => { if (start) apply(start.v + ((start.y - e.clientY) / start.h) * f.max); };
+  track.onpointerup = track.onpointercancel = () => {
+    if (!start) return;
+    start = null;
+    track.classList.remove("active");
+    if (S.undo.length && S.undo.at(-1).bank.presets[S.current].every((b, i) => b === S.local.presets[S.current][i])) S.undo.pop();
+    render();
+  };
+  track.onkeydown = e => {
+    const step = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 10, PageDown: -10 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    pushUndo();
+    apply(get(key) + step);
+    render();
+  };
+  return el;
+}
+
+function paintFader(el, v) {
+  const f = F[el.dataset.fader], pct = (v / f.max) * 100;
+  el.querySelector(".fill").style.height = `${pct}%`;
+  el.querySelector(".thumb").style.bottom = `calc(${pct}% - 11px)`;
+  el.querySelector("output").textContent = v;
+  el.querySelector(".zone").textContent = zoneOf(f, v);
+  el.querySelector(".track").setAttribute("aria-valuenow", v);
 }
 
 function render() {
@@ -115,67 +160,120 @@ function render() {
   $("empty").hidden = has;
   $("editor").hidden = !has;
   $("bottom").hidden = !has;
+  for (const id of ["tbRead", "tbSave", "tbUndo", "tbLib"]) $(id).disabled = !has;
   if (!has) return;
 
   const mod = new Set(modified());
-  const curBank = Math.floor(S.current / 4);
-  $("banks").innerHTML = "";
-  for (let b = 0; b < 9; b++) {
-    const btn = document.createElement("button");
-    btn.textContent = `${b + 1}` + (bankName(b) ? ` · ${bankName(b)}` : "");
-    btn.className = (b === curBank ? "sel " : "") + ([0, 1, 2, 3].some(i => mod.has(b * 4 + i)) ? "mod" : "");
-    btn.onclick = () => select(b * 4 + (S.current % 4));
-    $("banks").append(btn);
+  const cur = S.current, curBank = Math.floor(cur / 4), p = S.local.presets[cur];
+  renderBrowser(mod);
+
+  // header
+  $("slotTag").textContent = slotName(cur);
+  if (document.activeElement !== $("alias")) $("alias").value = presetName(cur);
+  $("bankTag").textContent = `Banco ${curBank + 1}` + (bankName(curBank) ? ` · ${bankName(curBank)}` : "");
+  $("modBadge").hidden = !mod.has(cur);
+  $("revert").disabled = !mod.has(cur);
+  $("saveOne").disabled = !mod.has(cur) || !connected;
+  const [r, g, b] = p.slice(18, 21);
+  $("led").value = rgbHex(p);
+  $("led").parentElement.style.background = rgbHex(p);
+  $("led").parentElement.style.setProperty("--led-ink", r * 0.299 + g * 0.587 + b * 0.114 > 140 ? "#111" : "#fff");
+
+  // footswitches + display
+  for (const btn of document.querySelectorAll(".foot")) {
+    const s = curBank * 4 + +btn.dataset.i, q = S.local.presets[s];
+    btn.classList.toggle("sel", s === cur);
+    btn.style.borderColor = s === cur ? rgbHex(q) : "#3a3f45";
+    btn.style.setProperty("--ring", rgbHex(q));
+    const name = btn.parentElement.querySelector(".foot-name");
+    name.textContent = presetName(s) || ampName(q);
+    name.classList.toggle("mod", mod.has(s));
   }
-  $("slots").innerHTML = "";
-  for (let i = 0; i < 4; i++) {
-    const s = curBank * 4 + i, p = S.local.presets[s];
-    const card = document.createElement("button");
-    card.className = "slot" + (s === S.current ? " sel" : "") + (mod.has(s) ? " mod" : "");
-    card.style.borderLeftColor = rgbHex(p);
-    card.innerHTML = `<span class="l">${slotName(s)}</span><span class="n"></span><span class="a"></span>`;
-    card.querySelector(".n").textContent = presetName(s) || ampName(p);
-    card.querySelector(".a").textContent = `${ampName(p)} · ${CAB_MODELS[p[F.cab.offset]] ?? "?"}`;
-    card.onclick = () => select(s);
-    $("slots").append(card);
+  $("dispSlot").textContent = slotName(cur);
+  $("dispBank").textContent = bankName(curBank) || `BANCO ${curBank + 1}`;
+
+  // modules
+  for (const m of MODULES) {
+    const el = document.querySelector(`.${m.cls}`);
+    const on = m.sw ? !!get(m.sw) : m.select === "cab" ? get("cab") > 0 : get("gate") > 0;
+    el.classList.toggle("off", !on);
+    for (const led of el.querySelectorAll(".led")) led.classList.toggle("on", on);
+    const sw = el.querySelector(".switch");
+    if (sw) { sw.textContent = on ? "ON" : "OFF"; sw.classList.toggle("on", on); }
+    const sel = el.querySelector("select");
+    if (sel) sel.value = get(sel.dataset.key);
+    for (const fd of el.querySelectorAll(".fader")) paintFader(fd, get(fd.dataset.fader));
   }
 
-  $("slotTag").textContent = slotName(S.current);
-  if (document.activeElement !== $("alias")) $("alias").value = presetName(S.current);
-  $("modBadge").hidden = !mod.has(S.current);
-  $("revert").disabled = !mod.has(S.current);
-  $("activate").disabled = !connected;
-  $("led").value = rgbHex(S.local.presets[S.current]);
-  for (const el of document.querySelectorAll("#sections [data-key]")) {
-    const key = el.dataset.key, v = get(key);
-    if (el.classList.contains("switch")) {
-      el.textContent = v ? "ON" : "OFF";
-      el.classList.toggle("on", !!v);
-      el.closest(".section").classList.toggle("offx", !v);
-    } else {
-      el.value = v;
-      const row = el.closest(".ctl");
-      if (row.querySelector("output")) row.querySelector("output").textContent = v;
-      if (row.querySelector("small")) row.querySelector("small").textContent = zoneOf(F[key], v);
-    }
-  }
-  $("undo").disabled = !S.undo.length;
-  $("save").disabled = !mod.size || !connected;
-  $("save").textContent = mod.size ? `Guardar (${mod.size})` : "Guardar";
+  rememberDraft();
+  updateActions(mod);
 }
+
+function updateActions(mod = new Set(modified())) {
+  const connected = !!S.dev, n = mod.size;
+  $("undo").disabled = $("tbUndo").disabled = !S.undo.length;
+  $("save").disabled = $("tbSave").disabled = !n || !connected;
+  $("save").textContent = n ? `Guardar (${n})` : "Guardar";
+  $("tbSave").textContent = n ? `Guardar cambios (${n})` : "Guardar cambios";
+  $("modBadge").hidden = !mod.has(S.current);
+  $("saveOne").disabled = !mod.has(S.current) || !connected;
+}
+
+function renderBrowser(mod) {   // the 36 presets at a glance, like the desktop app
+  const root = $("browserGrid");
+  root.innerHTML = "";
+  for (let b = 0; b < 9; b++) {
+    const h = document.createElement("div");
+    h.className = "bhead";
+    h.textContent = `BANCO ${b + 1}` + (bankName(b) ? ` · ${bankName(b)}` : "");
+    root.append(h);
+    const row = document.createElement("div");
+    row.className = "brow";
+    for (let i = 0; i < 4; i++) {
+      const s = b * 4 + i, p = S.local.presets[s];
+      const c = document.createElement("button");
+      c.className = "bslot" + (s === S.current ? " sel" : "") + (mod.has(s) ? " mod" : "");
+      c.style.borderColor = s === S.current ? "#fff" : rgbHex(p);
+      c.textContent = presetName(s) || ampName(p);
+      c.title = `${slotName(s)} · ${ampName(p)}`;
+      c.onclick = () => { select(s); closeBrowser(); };
+      row.append(c);
+    }
+    root.append(row);
+  }
+}
+
+const openBrowser = () => { if (!document.body.classList.contains("tablet")) document.body.classList.add("browsing"); };
+const closeBrowser = () => document.body.classList.remove("browsing");
+
+// phone / tablet view: automatic by width, or forced from the menu --------------------------
+const VIEWS = { auto: "automática", phone: "teléfono", tablet: "tablet" };
+let view = store.get("tankg.view", "auto");
+const wide = matchMedia("(min-width: 760px) and (min-height: 560px)");   // phones in landscape keep the phone layout
+function applyView() {
+  const tablet = view === "tablet" || (view === "auto" && wide.matches);
+  document.body.classList.toggle("tablet", tablet);
+  if (tablet) closeBrowser();
+  document.querySelector('[data-cmd="view"]').textContent = `Vista: ${VIEWS[view]}`;
+  if (tablet && !$("libSheet").hidden && S.libBank) $("libList").hidden = false;
+}
+wide.addEventListener?.("change", applyView);
 
 function select(slot) { S.current = slot; render(); }
 
 function setField(key, value, full = true) {
   S.local.presets[S.current][F[key].offset] = value;
-  if (full) render(); else renderLight();
+  if (full) render(); else updateActions();
 }
 
-function renderLight() {   // while dragging a slider: only the badges, not the inputs
-  const mod = new Set(modified());
-  $("modBadge").hidden = !mod.has(S.current);
-  $("save").textContent = mod.size ? `Guardar (${mod.size})` : "Guardar";
-  $("save").disabled = !mod.size || !S.dev;
+/** Footswitch: select the preset and, like on the pedal, make it sound. */
+function pressFoot(i) {
+  const s = Math.floor(S.current / 4) * 4 + i;
+  select(s);
+  if (!S.dev) return;
+  S.dev.selectPreset(s);
+  toast(modified().includes(s) ? `${slotName(s)} activo · suena la versión guardada (tiene cambios sin guardar)`
+    : `${slotName(s)} activo en la pedalera`, 2200);
 }
 
 // dialogs -----------------------------------------------------------------------------------
@@ -221,7 +319,7 @@ async function connect(silent = false) {
   S.busy = true;
   $("emptyError").textContent = "";
   try {
-    const dev = await openWebMidi();
+    const dev = await openMidi();
     const fromDemo = S.demo;
     S.dev = dev;
     S.demo = false;
@@ -235,7 +333,7 @@ async function connect(silent = false) {
     if (!silent) {
       // Connect by itself as soon as the pedal is plugged in (permission is already granted).
       S.wanted = true;
-      navigator.requestMIDIAccess?.({ sysex: true }).then(watchPorts).catch(() => {});
+      midiAccess().then(watchPorts).catch(() => {});
       if (S.local) info("No se pudo conectar", e.message); else $("emptyError").textContent = e.message;
     }
   } finally {
@@ -244,7 +342,22 @@ async function connect(silent = false) {
   }
 }
 
+// Unsaved edits survive Android closing the app in the background: kept while they apply to the
+// same pedal contents, dropped as soon as the pedal holds something else.
+function rememberDraft() {
+  if (S.demo || !S.local || !S.device) return;
+  if (modified().length) store.set("tankg.draft", { device: toHex(S.device.toBytes()), local: toHex(S.local.toBytes()) });
+  else store.set("tankg.draft", null);
+}
+
 function adoptBank(bank, fresh = false) {
+  const draft = !S.local && store.get("tankg.draft", null);
+  if (draft && draft.device === toHex(bank.toBytes())) {
+    S.device = bank;
+    S.local = Bank.fromBytes(fromHex(draft.local));
+    toast(`Recuperados ${modified().length} cambios sin guardar`);
+    return;
+  }
   S.device = bank;
   // Keep unsaved edits across a reconnection of the same pedal, but never carry the demo bank
   // over to a real pedal: «Guardar» would overwrite it with demo presets.
@@ -419,7 +532,7 @@ function renderLibList() {
 function showLibBank(b) {
   S.libBank = b;
   S.libPick = 0;
-  $("libList").hidden = true;
+  $("libList").hidden = !document.body.classList.contains("tablet");
   $("libDetail").hidden = false;
   $("libTitle").textContent = b.name;
   $("libDesc").textContent = b.genre;
@@ -492,7 +605,14 @@ function openBackups() {
     dl.className = "btn small";
     dl.textContent = "Descargar";
     dl.onclick = () => {
-      const stamp = when.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+      const z = n => String(n).padStart(2, "0");   // local time, like the desktop backups
+      const stamp = `${when.getFullYear()}${z(when.getMonth() + 1)}${z(when.getDate())}-${z(when.getHours())}${z(when.getMinutes())}${z(when.getSeconds())}`;
+      if (ANDROID) {
+        const bytes = fromHex(b.hex);
+        const where = globalThis.AndroidMidi.saveFile(`tankg-${stamp}.tgbank`, btoa(String.fromCharCode(...bytes)));
+        toast(where ? `Guardado en ${where}` : "No se pudo guardar el archivo");
+        return;
+      }
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([fromHex(b.hex)], { type: "application/octet-stream" }));
       a.download = `tankg-${stamp}.tgbank`;
@@ -528,24 +648,31 @@ function wire() {
     if (cmd === "read") readDevice();
     if (cmd === "backups") openBackups();
     if (cmd === "demo") startDemo();
+    if (cmd === "view") {
+      view = { auto: "phone", phone: "tablet", tablet: "auto" }[view];
+      store.set("tankg.view", view);
+      applyView();
+      toast(`Vista ${VIEWS[view]}`);
+    }
     if (cmd === "about") info("Tank-G Control", "Editor de presets para la M-VAVE Tank-G.\n\nVersión web/Android de la app de " +
       "escritorio: mismo protocolo verificado, backup antes de escribir y verificación por relectura.\n\n" +
-      "Requiere Chrome y la pedalera conectada por USB-OTG.");
+      (ANDROID ? "Conecta la pedalera por USB-OTG." : "Requiere Chrome y la pedalera conectada por USB-OTG."));
   };
   $("alias").onchange = () => { pushUndo(); setPresetName(S.current, $("alias").value); render(); };
-  $("activate").onclick = () => {
-    if (!S.dev) return;
-    S.dev.selectPreset(S.current);
-    toast(modified().includes(S.current) ? `${slotName(S.current)} activo (suena la versión guardada en la pedalera)`
-      : `${slotName(S.current)} activo en la pedalera`);
-  };
+  for (const f of document.querySelectorAll(".foot")) f.onclick = () => pressFoot(+f.dataset.i);
+  $("bankDown").onclick = () => select((S.current + SLOTS - 4) % SLOTS);
+  $("bankUp").onclick = () => select((S.current + 4) % SLOTS);
+  $("display").onclick = openBrowser;
+  $("browserClose").onclick = closeBrowser;
+  $("saveOne").onclick = () => upload([S.current], S.current);
+  $("tbRead").onclick = readDevice;
   $("revert").onclick = () => { pushUndo(); S.local.presets[S.current] = Uint8Array.from(S.device.presets[S.current]); render(); };
   $("led").onchange = e => {
     pushUndo();
     S.local.presets[S.current].set(fromHex(e.target.value.slice(1)), 18);
     render();
   };
-  $("undo").onclick = () => {
+  $("undo").onclick = $("tbUndo").onclick = () => {
     const u = S.undo.pop();
     if (!u) return;
     S.local = u.bank;
@@ -553,11 +680,11 @@ function wire() {
     saveAliases();
     render();
   };
-  $("save").onclick = saveAll;
-  $("library").onclick = openLibrary;
+  $("save").onclick = $("tbSave").onclick = saveAll;
+  $("library").onclick = $("tbLib").onclick = openLibrary;
   $("libSearch").oninput = renderLibList;
   for (const b of document.querySelectorAll("[data-close]")) b.onclick = () => {
-    if (!$("libDetail").hidden && !$("libSheet").hidden) showLibList();
+    if (!$("libDetail").hidden && !$("libSheet").hidden && !document.body.classList.contains("tablet")) showLibList();
     else b.closest(".sheet").hidden = true;
   };
   $("libOne").onclick = () => {
@@ -574,16 +701,26 @@ function wire() {
   window.addEventListener("popstate", () => {
     const open = [...document.querySelectorAll(".sheet")].find(s => !s.hidden);
     if (open) { open.hidden = true; history.pushState({}, ""); }
+    else if (document.body.classList.contains("browsing")) { closeBrowser(); history.pushState({}, ""); }
   });
   history.pushState({}, "");
 }
 
-buildSections();
+buildModules();
 wire();
 loadAliases();
+applyView();
 render();
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
-// Reconnect without a prompt when MIDI permission was already granted.
-navigator.permissions?.query({ name: "midi", sysex: true }).then(p => { if (p.state === "granted") connect(true); }).catch(() => {});
+if (ANDROID) {
+  // Native app: no permission prompt; connect now and whenever the pedal is plugged in.
+  $("emptyHint").textContent = "Enchufa la pedalera al teléfono o tablet con un adaptador USB-OTG y enciéndela: se conecta sola.";
+  S.wanted = true;
+  midiAccess().then(watchPorts);
+  connect(true);
+} else {
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  // Reconnect without a prompt when MIDI permission was already granted.
+  navigator.permissions?.query({ name: "midi", sysex: true }).then(p => { if (p.state === "granted") connect(true); }).catch(() => {});
+}
 
 window.tankg = { S, connect, startDemo, upload, applyPresets };   // for debugging over adb

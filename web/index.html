@@ -13,7 +13,14 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="logo">TANK-G</span><span class="sub">Control</span></div>
+  <div class="brand"><span class="logo">TANK-G</span><span class="sub">Control Center</span></div>
+  <nav class="toolbar" aria-label="Acciones">
+    <button id="tbRead" class="tb">Leer pedalera</button>
+    <button id="tbSave" class="tb primary">Guardar cambios</button>
+    <button id="tbUndo" class="tb">Deshacer</button>
+    <span class="tsep"></span>
+    <button id="tbLib" class="tb accent">Biblioteca de sonidos</button>
+  </nav>
   <span id="status" class="pill off">Desconectada</span>
   <button id="connect" class="btn primary small">Conectar</button>
   <button id="menuBtn" class="icon" aria-label="Menú">⋮</button>
@@ -22,14 +29,16 @@
 <nav id="menu" class="menu" hidden>
   <button data-cmd="read">Leer pedalera</button>
   <button data-cmd="backups">Backups</button>
+  <button data-cmd="view">Vista: automática</button>
   <button data-cmd="demo">Modo demo (sin pedalera)</button>
   <button data-cmd="about">Acerca de</button>
 </nav>
 
 <main id="app">
   <section id="empty" class="empty">
-    <h1>Conecta tu Tank-G</h1>
-    <p>Enchufa la pedalera al teléfono con un adaptador <b>USB-OTG</b>, enciéndela y pulsa
+    <div class="empty-logo">TANK-G</div>
+    <h1>Conecta tu pedalera</h1>
+    <p id="emptyHint">Enchufa la pedalera al teléfono con un adaptador <b>USB-OTG</b>, enciéndela y pulsa
       <b>Conectar</b>. Chrome pedirá permiso para usar dispositivos MIDI: acéptalo.</p>
     <button id="connectBig" class="btn primary">Conectar</button>
     <button id="demoBig" class="btn">Probar en modo demo</button>
@@ -37,23 +46,42 @@
   </section>
 
   <section id="editor" hidden>
-    <div id="banks" class="banks" role="tablist"></div>
-    <div id="slots" class="slots"></div>
+    <aside id="browser" class="browser" aria-label="Presets">
+      <div class="browser-head"><b>PRESETS</b><span class="legend">• sin guardar</span>
+        <button id="browserClose" class="icon" aria-label="Cerrar">✕</button></div>
+      <div class="cols"><span>A</span><span>B</span><span>C</span><span>D</span></div>
+      <div id="browserGrid"></div>
+    </aside>
 
-    <div class="preset-head">
-      <span id="slotTag" class="slot-tag">1A</span>
-      <input id="alias" class="alias" maxlength="40" placeholder="Nombre del preset…" aria-label="Nombre del preset">
-      <span id="modBadge" class="badge" hidden>modificado</span>
-    </div>
-    <div class="row-actions">
-      <button id="activate" class="btn small">Activar en la pedalera</button>
-      <button id="revert" class="btn small">Revertir</button>
-      <label class="led-pick">LED <input id="led" type="color" aria-label="Color del LED"></label>
-    </div>
+    <div class="edit">
+      <div class="preset-head">
+        <span id="slotTag" class="slot-tag">1A</span>
+        <input id="alias" class="alias" maxlength="40" placeholder="Nombre del preset…" aria-label="Nombre del preset">
+        <span id="bankTag" class="bank-tag"></span>
+        <span id="modBadge" class="badge" hidden>modificado</span>
+        <div class="head-actions">
+          <label class="led-btn" title="Color del LED del interruptor"><input id="led" type="color" aria-label="Color del LED"><span>LED</span></label>
+          <button id="revert" class="btn small">Revertir</button>
+          <button id="saveOne" class="btn small primary">Guardar preset</button>
+        </div>
+      </div>
 
-    <div id="sections"></div>
-    <p class="note">TYPE e IR CAB verificados. El resto de controles se deduce del manual.
-      MASTER es global y no se guarda en el preset.</p>
+      <div class="pedal">
+        <div class="pedal-brand"><span class="mvave">M-VAVE</span><span class="pname">TANK-G</span></div>
+        <div class="feet">
+          <div class="foot-wrap f0"><button class="foot" data-i="0">A</button><span class="foot-fn">A/REVERB</span><span class="foot-name"></span></div>
+          <button id="bankDown" class="bankbtn">◀ BANK −</button>
+          <div class="foot-wrap f1"><button class="foot" data-i="1">B</button><span class="foot-fn">B/DELAY</span><span class="foot-name"></span></div>
+          <button id="display" class="display" aria-label="Ver todos los presets"><b id="dispSlot">1A</b><small id="dispBank"></small></button>
+          <div class="foot-wrap f2"><button class="foot" data-i="2">C</button><span class="foot-fn">C/MOD</span><span class="foot-name"></span></div>
+          <button id="bankUp" class="bankbtn">BANK + ▶</button>
+          <div class="foot-wrap f3"><button class="foot" data-i="3">D</button><span class="foot-fn">D/AMP</span><span class="foot-name"></span></div>
+        </div>
+        <div id="modules" class="modules"></div>
+      </div>
+      <p class="note">TYPE e IR CAB verificados · el resto de controles se deduce del manual · MASTER es global y no
+        se guarda en el preset · tocar un interruptor A–D activa ese preset en la pedalera</p>
+    </div>
   </section>
 </main>
 
@@ -95,7 +123,7 @@
   </div>
   <div class="sheet-body">
     <p class="muted">Copia del banco completo guardada antes de la primera escritura de cada sesión
-      (se guardan las 20 últimas en este navegador). Descárgalas para tenerlas a salvo: el archivo
+      (se guardan las 20 últimas en este dispositivo). Descárgalas para tenerlas a salvo: el archivo
       .tgbank también se abre en la versión de escritorio.</p>
     <div id="bakList"></div>
   </div>
