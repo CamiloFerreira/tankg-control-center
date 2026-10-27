@@ -7,19 +7,19 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 - **Linux:** `TankG-linux-x86_64` — `chmod +x TankG-linux-x86_64 && ./TankG-linux-x86_64`.
   Con argumentos funciona como línea de comandos (`./TankG-linux-x86_64 list`).
 - **Android 6+:** `TankG-android.apk` — ábrelo en el teléfono o tablet y permite «instalar apps de
-  esta fuente». Conecta la pedalera con un adaptador **USB-OTG**: se conecta sola, sin permisos.
+  esta fuente». Conecta la pedalera con un adaptador **USB-OTG** o por **Bluetooth** (Tank-G v2).
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
 ## Novedades
 
-- **«Copiar y abrir chat» usa la app de la IA si la tienes instalada y le pasa las instrucciones:**
-  en Android se comparten a la app de Claude, ChatGPT o Gemini (aparecen en el cuadro de mensaje);
-  en el PC, Claude Desktop abre un chat nuevo con las instrucciones ya escritas (la app de ChatGPT
-  se abre si registra su enlace). Si no hay app, se abre la página web como antes. Las instrucciones
-  quedan copiadas igual, por si hay que pegarlas.
-
-Si tienes la 1.5.0, esta versión te llega sola: la app avisa al abrirla.
+- **Bluetooth (Tank-G v2), sin cable:**
+  - **Android:** empareja la pedalera en los ajustes de Android y la app se conecta sola al abrirse
+    (como la app oficial). Si la apagas y la enciendes, se reconecta.
+  - **Windows/Linux:** Pedalera → Puerto MIDI… → Bluetooth → Buscar, elige la pedalera y Guardar.
+  - Todo funciona igual que por USB: leer, guardar con verificación, biblioteca, IA, escucha en vivo.
+  - La pedalera acepta **una conexión a la vez**: cierra la app del teléfono para usar el PC y al revés.
+- Ya no hay versión web: solo Windows, Linux y Android.
 
 ## Verificar la descarga
 
