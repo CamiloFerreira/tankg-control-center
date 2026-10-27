@@ -233,6 +233,19 @@ class Settings:
         self.data["ai"] = ai
         self.save()
 
+    @property
+    def ble(self) -> tuple[str, str] | None:
+        """(name, address) of the Bluetooth pedal chosen in "Puerto MIDI…", or None."""
+        b = self.data.get("ble") or {}
+        return (b["name"], b["address"]) if b.get("address") else None
+
+    def set_ble(self, device: tuple[str, str] | None) -> None:
+        if device:
+            self.data["ble"] = {"name": device[0], "address": device[1]}
+        else:
+            self.data.pop("ble", None)
+        self.save()
+
     def set_midi_ports(self, ports: tuple[str, str] | None) -> None:
         if ports:
             self.data["midi_in"], self.data["midi_out"] = ports

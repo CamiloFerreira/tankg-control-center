@@ -20,7 +20,7 @@ VERSION=${TANKG_VERSION:-$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$ROOT/tankg/
 IFS=. read -r MA MI PA <<<"$VERSION"
 VCODE=$(( ${MA:-1} * 10000 + ${MI:-0} * 100 + ${PA:-0} ))
 
-cp -r "$ROOT/web" "$OUT/assets/web"
+cp -r "$HERE/ui" "$OUT/assets/web"
 rm -f "$OUT/assets/web/package.json"
 
 DEBUG_FLAG=()

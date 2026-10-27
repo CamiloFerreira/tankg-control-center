@@ -23,7 +23,7 @@ import java.util.UUID;
 /**
  * Bluetooth LE link to the pedal (Tank-G v2 advertises "TANK-Gv2_BLE"). The editor protocol runs
  * over the Jieli serial service: writes to ae41, notifications from ae42 (captured from the
- * official app, research/FINDINGS.md). Framing is done in web/js/protocol.js; this class only
+ * official app, research/FINDINGS.md). Framing is done in android/ui/js/protocol.js; this class only
  * moves bytes: send(hex) and notifications -> __bleIn(hex), state -> __bleState(state, detail).
  */
 @SuppressLint("MissingPermission")   // MainActivity checks the Bluetooth permissions before any call

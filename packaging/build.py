@@ -24,7 +24,10 @@ args = [
     "--workpath", str(ROOT / "build"),
     "--specpath", str(ROOT / "build"),
 ]
+args += ["--collect-submodules", "bleak"]   # backends are imported by platform at run time
 if sys.platform == "win32":
-    args += ["--windowed", "--icon", str(ROOT / "packaging/icon.ico")]
+    args += ["--windowed", "--icon", str(ROOT / "packaging/icon.ico"), "--collect-submodules", "winrt"]
+else:
+    args += ["--collect-submodules", "dbus_fast"]
 
 PyInstaller.__main__.run(args)

@@ -1,3 +1,4 @@
 PySide6>=6.7
 python-rtmidi>=1.5; sys_platform != "linux"
+bleak>=0.22            # Bluetooth LE (Tank-G v2)
 pytest>=8

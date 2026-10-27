@@ -1,9 +1,9 @@
-// Run by tests/test_web.py with node: the JS protocol must produce the frames captured from
+// Run by tests/test_ui.py with node: the JS protocol must produce the frames captured from
 // the real pedal (same goldens as tests/test_tankg.py) and behave like the Python TankG.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import * as P from "../../web/js/protocol.js";
-import { LIBRARY, FIELDS } from "../../web/js/data.js";
+import * as P from "../../android/ui/js/protocol.js";
+import { LIBRARY, FIELDS } from "../../android/ui/js/data.js";
 
 const hex = b => Array.from(b, v => v.toString(16).padStart(2, "0")).join(" ");
 const LIVE = Uint8Array.from(readFileSync(new URL("../live_bank.bin", import.meta.url)));

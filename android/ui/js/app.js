@@ -1,4 +1,4 @@
-// Tank-G Control for Android (Chrome + Web MIDI over USB-OTG). Same model as the desktop app:
+// Tank-G Control for Android (USB-OTG or Bluetooth, through MainActivity). Same model as the desktop app:
 // `device` = last bank read from the pedal, `local` = working copy; "modified" = slots that
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
@@ -21,7 +21,7 @@ const MODULES = [
 const DEMO_BANKS = ["Guitarra eléctrica", "Metallica", "Iron Maiden", "AC/DC", "Blind Guardian", "Korn",
   "Bajo limpio", "Guitarra clásica (nylon)", "Strato: limpios"];
 
-const ANDROID = !!globalThis.AndroidMidi;   // running inside the APK (native MIDI bridge)
+const A = globalThis.AndroidMidi;   // native bridge of MainActivity (MIDI, Bluetooth, files, updates)
 const S = { dev: null, demo: false, device: null, local: null, current: 0, undo: [], busy: false,
   backupDone: false, wanted: false, libBank: null, libPick: 0, clipboard: null, live: false };
 
@@ -613,17 +613,7 @@ function openBackups() {
     dl.onclick = () => {
       const z = n => String(n).padStart(2, "0");   // local time, like the desktop backups
       const stamp = `${when.getFullYear()}${z(when.getMonth() + 1)}${z(when.getDate())}-${z(when.getHours())}${z(when.getMinutes())}${z(when.getSeconds())}`;
-      if (ANDROID) {
-        const bytes = fromHex(b.hex);
-        const where = globalThis.AndroidMidi.saveFile(`tankg-${stamp}.tgbank`, btoa(String.fromCharCode(...bytes)));
-        toast(where ? `Guardado en ${where}` : "No se pudo guardar el archivo");
-        return;
-      }
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([fromHex(b.hex)], { type: "application/octet-stream" }));
-      a.download = `tankg-${stamp}.tgbank`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      download(`tankg-${stamp}.tgbank`, fromHex(b.hex));
     };
     const load = document.createElement("button");
     load.className = "btn small";
@@ -724,20 +714,12 @@ function pickFile(accept) {
   });
 }
 
-function download(name, data, mime = "application/octet-stream") {
+function download(name, data, mime = "application/octet-stream") {   // saved in Downloads by MainActivity
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-  if (ANDROID) {
-    let bin = "";
-    bytes.forEach(b => { bin += String.fromCharCode(b); });
-    const where = globalThis.AndroidMidi.saveFile(name, btoa(bin), mime);
-    toast(where ? `Guardado en ${where}` : "No se pudo guardar el archivo");
-    return;
-  }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  let bin = "";
+  bytes.forEach(b => { bin += String.fromCharCode(b); });
+  const where = A.saveFile(name, btoa(bin), mime);
+  toast(where ? `Guardado en ${where}` : "No se pudo guardar el archivo");
 }
 
 const safeName = t => t.replace(/[\\/:*?"<>|]/g, "-").trim();
@@ -827,10 +809,7 @@ async function toggleLive() {
 // MIDI port ---------------------------------------------------------------------------------------
 
 async function midiDevices() {
-  if (ANDROID) return [...JSON.parse(globalThis.AndroidMidi.list()).map(d => d.name),
-    ...androidBluetoothPedals().map(p => `${p.name} (Bluetooth)`)];
-  const access = await midiAccess();
-  return [...access.outputs.values()].map(o => o.name);
+  return [...JSON.parse(A.list()).map(d => d.name), ...androidBluetoothPedals().map(p => `${p.name} (Bluetooth)`)];
 }
 
 async function openPorts() {
@@ -984,12 +963,9 @@ function aiCopy() {
   if (!text) return toast("Describe primero el sonido.");
   aiSave();
   const prompt = webPrompt(text, $("aiInstrument").value, aiBank());
-  if (ANDROID) globalThis.AndroidMidi.copyText(prompt); else navigator.clipboard?.writeText(prompt).catch(() => {});
+  A.copyText(prompt);
   const site = $("aiSite").value, url = AI.webSites[site];
-  let where = "web";
-  if (ANDROID && globalThis.AndroidMidi.openChat) where = globalThis.AndroidMidi.openChat(AI.chatApps[site]?.android || "", url, prompt);
-  else if (ANDROID) globalThis.AndroidMidi.openUrl(url);
-  else window.open(url, "_blank", "noopener");
+  const where = A.openChat(AI.chatApps[site]?.android || "", url, prompt);
   toast(where === "shared" ? `Instrucciones enviadas a la app de ${site}: revisa el mensaje y envíalo (también quedaron copiadas)`
     : `Instrucciones copiadas: pégalas en ${where === "app" ? `la app de ${site}` : "el chat"} y envía`, 5000);
 }
@@ -1011,7 +987,7 @@ function aiApply() {
 
 const versionTuple = v => String(v).replace(/^v/, "").split(".").map(n => parseInt(n, 10) || 0);
 const newer = (a, b) => { const x = versionTuple(a), y = versionTuple(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
-const appVersion = () => (ANDROID && globalThis.AndroidMidi.version?.()) || VERSION;
+const appVersion = () => A.version?.() || VERSION;
 
 async function checkUpdate(manual = false) {
   let rel;
@@ -1029,16 +1005,14 @@ async function checkUpdate(manual = false) {
   if (!newer(latest, current)) { if (manual) info("Actualizaciones", `Tienes la última versión (${current}).`); return; }
   const asset = n => (rel.assets || []).find(a => a.name === n)?.browser_download_url;
   const notes = String(rel.body || "").split("\n## Verificar")[0].slice(0, 900);
-  if (ANDROID && asset("TankG-android.apk") && asset("SHA256SUMS")) {
+  if (asset("TankG-android.apk") && asset("SHA256SUMS")) {
     if (await ask(`Versión ${latest.replace(/^v/, "")} disponible`, `Tienes la ${current}.\n\n${notes}\n\n¿Descargar e instalar ahora?`, "Actualizar")) {
       modal({ title: "Actualizando", step: "Preparando…", bar: false });
       $("mClose").onclick = closeModal;
-      globalThis.AndroidMidi.installUpdate(asset("TankG-android.apk"), asset("SHA256SUMS"));
+      A.installUpdate(asset("TankG-android.apk"), asset("SHA256SUMS"));
     }
-  } else if (ANDROID) {
-    if (manual) info("Actualizaciones", `Hay una versión ${latest} pero aún no trae la APK.`);
-  } else if (manual || !ANDROID) {
-    info(`Versión ${latest.replace(/^v/, "")} disponible`, `Tienes la ${current}. Recarga la página para usar la nueva versión.`);
+  } else if (manual) {
+    info("Actualizaciones", `Hay una versión ${latest} pero aún no trae la APK.`);
   }
 }
 globalThis.__updateState = (state, detail) => {
@@ -1168,7 +1142,7 @@ async function run(cmd) {
     case "about":
       return info("Tank-G Control Center", `Versión ${appVersion()}\n\nEditor de presets para la M-VAVE Tank-G: la misma app en ` +
         "Windows, Linux y Android, con el protocolo verificado, backup antes de escribir y verificación por relectura.\n\n" +
-        (ANDROID ? "Conecta la pedalera por USB-OTG." : "Requiere Chrome y la pedalera conectada por USB-OTG."));
+        "Conecta la pedalera por USB-OTG o emparéjala por Bluetooth (Tank-G v2).");
   }
 }
 
@@ -1233,7 +1207,7 @@ function wire() {
       render();
     } catch (e) {
       $("portState").textContent = `✗ ${e.message}`;
-      if (ANDROID && S.dev && !S.demo) { S.dev = null; render(); }   // the old link was closed by the attempt
+      if (S.dev && !S.demo) { S.dev = null; render(); }   // the old link was closed by the attempt
     } finally { S.busy = false; }
   };
   $("portSave").onclick = () => {
@@ -1297,22 +1271,15 @@ wire();
 loadAliases();
 applyView();
 render();
-if (ANDROID) {
-  // Native app: no permission prompt; connect now and whenever the pedal is plugged in.
-  $("emptyHint").textContent = "Enchufa la pedalera al teléfono o tablet con un adaptador USB-OTG y enciéndela: se conecta sola.";
-  S.wanted = true;
-  midiAccess().then(watchPorts);
-  connect(true);
-  // A Bluetooth pedal sends no "plugged in" event: retry quietly while the app is open, like M-EFCS.
-  setInterval(() => {
-    if (S.wanted && !S.dev && !S.busy && !S.demo && document.visibilityState === "visible" && androidBluetoothPedals().length) connect(true);
-  }, 15000);
-} else {
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
-  // Reconnect without a prompt when MIDI permission was already granted.
-  navigator.permissions?.query({ name: "midi", sysex: true }).then(p => { if (p.state === "granted") connect(true); }).catch(() => {});
-}
+// Connect now and whenever the pedal is plugged in; Bluetooth pedals are retried while the app is open.
+$("emptyHint").textContent = "Conecta la pedalera por USB-OTG o, si es una Tank-G v2, emparéjala por Bluetooth en los ajustes de Android: se conecta sola.";
+S.wanted = true;
+midiAccess().then(watchPorts);
+connect(true);
+setInterval(() => {   // a Bluetooth pedal sends no "plugged in" event: retry quietly, like M-EFCS
+  if (S.wanted && !S.dev && !S.busy && !S.demo && document.visibilityState === "visible" && androidBluetoothPedals().length) connect(true);
+}, 15000);
 
-if (ANDROID && Date.now() - store.get("tankg.lastUpdateCheck", 0) > 20 * 3600 * 1000) setTimeout(() => checkUpdate(false), 4000);
+if (Date.now() - store.get("tankg.lastUpdateCheck", 0) > 20 * 3600 * 1000) setTimeout(() => checkUpdate(false), 4000);
 
 window.tankg = { S, connect, startDemo, upload, applyPresets, run, checkUpdate };   // for debugging over adb

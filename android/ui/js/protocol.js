@@ -283,8 +283,8 @@ const score = name => {
   return PORT_HINTS.some(h => n.includes(h)) ? 2 : WEAK_HINTS.some(h => n.includes(h)) ? 1 : 0;
 };
 
-/** Opens the pedal with whatever this platform offers: the Android app's native bridge or Web MIDI. */
-export const openMidi = (port = "") => (globalThis.AndroidMidi ? openAndroidMidi(port) : openWebMidi(port));
+/** Opens the pedal through the APK's native bridge: USB-MIDI first, then bonded Bluetooth pedals. */
+export const openMidi = (port = "") => openAndroidMidi(port);
 
 /** A port chosen by the user wins (like the desktop "Puerto MIDI…" setting); otherwise best match first. */
 function choose(items, port) {
@@ -295,12 +295,9 @@ function choose(items, port) {
 }
 
 /** Object whose onstatechange({port: {state, name}}) fires when MIDI devices come and go. */
-export function midiAccess() {
-  if (globalThis.AndroidMidi) return Promise.resolve(androidAccess);
-  return navigator.requestMIDIAccess ? navigator.requestMIDIAccess({ sysex: true }) : Promise.reject(new Error("no MIDI"));
-}
+export const midiAccess = () => Promise.resolve(androidAccess);
 
-// Android app: MainActivity exposes `AndroidMidi` (android.media.midi) and calls back into
+// MainActivity exposes `AndroidMidi` (android.media.midi + Bluetooth LE) and calls back into
 // these globals with hex strings; complete SysEx frames only.
 const androidAccess = { onstatechange: null };
 let androidIn = null;
@@ -391,47 +388,6 @@ async function openAndroidMidi(port) {
     } catch (e) { globalThis.AndroidMidi.close(); error = e; }
   }
   throw error;
-}
-
-/** Web MIDI (Chrome on Android over USB-OTG, Chrome/Edge on desktop). */
-export async function openWebMidi(port = "") {
-  if (!navigator.requestMIDIAccess)
-    throw new DeviceError("Este navegador no tiene Web MIDI. Usa Chrome en Android (o Chrome/Edge en PC).");
-  let access;
-  try { access = await navigator.requestMIDIAccess({ sysex: true }); }
-  catch { throw new DeviceError("Sin permiso para MIDI/SysEx. Acepta el permiso de «dispositivos MIDI» en Chrome."); }
-  const outs = [...access.outputs.values()], ins = [...access.inputs.values()];
-  // Candidates: names that point at the Tank-G first, then generic USB-MIDI, then anything.
-  const order = p => -score(p.name);
-  const pairs = [];
-  if (!outs.length) throw new DeviceError("No se ve ningún dispositivo MIDI. ¿La Tank-G está conectada por USB-OTG y encendida?");
-  for (const o of port ? choose(outs, port) : [...outs].sort((a, b) => order(a) - order(b))) {
-    const i = ins.find(i => i.name === o.name) || [...ins].sort((a, b) => order(a) - order(b))[0];
-    if (i) pairs.push([i, o]);
-  }
-  if (!pairs.length) throw new DeviceError("No se ve ningún dispositivo MIDI. ¿La Tank-G está conectada por USB-OTG y encendida?");
-  let error;
-  for (const [input, output] of pairs) {
-    const transport = webMidiTransport(input, output);
-    const dev = new TankG(transport);
-    try {
-      dev.bank = await dev.readBank(2);   // identifies the model: only a Tank-G answers with an A5 5A bank
-      dev.portName = output.name;
-      dev.access = access;
-      return dev;
-    } catch (e) { transport.close(); error = e; }
-  }
-  throw error;
-}
-
-function webMidiTransport(input, output) {
-  let cb = null;
-  input.onmidimessage = e => cb?.(e.data);
-  return {
-    send: data => output.send(Array.from(data)),
-    onMessage: f => { cb = f; },
-    close: () => { input.onmidimessage = null; },
-  };
 }
 
 /** In-memory pedal with the behaviour observed on the real one (tests/test_tankg.py FakePedal). */

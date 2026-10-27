@@ -7,6 +7,9 @@ Operations and their status (see research/FINDINGS.md):
   commit         CLS 09, CMD 0x41, space F, len 0                   verified (ACK, survives
                                                                    a power cycle)
   select preset  MIDI Program Change 0..35 on channel 1             verified (pedal switched 1A->1B)
+
+Bluetooth LE (Tank-G v2): same memory map with the framing of tankg/bleproto.py, over bleak
+(TankGBle, verified on the pedal from Android 2026-10-27).
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import sysex
+from . import bleproto, sysex
 from .model import BANK_LEN, Bank, Preset, REC_LEN, SLOTS
 
 USB_ID = "4c4a:c755"   # generic Jieli id, shared by other M-VAVE pedals
@@ -98,7 +101,12 @@ def _looks_like_tankg(name: str) -> bool:
 
 
 def _port_score(name: str) -> int:
-    """2 = name points at the Tank-G, 1 = generic USB-MIDI name, 0 = unrelated."""
+    """2 = name points at the Tank-G, 1 = generic USB-MIDI name, 0 = unrelated. The pedal's BLE-MIDI
+    port (BlueZ names it "TANK-Gv2_BLE Bluetooth") takes channel messages but ignores the editor
+    SysEx: Bluetooth goes through TankGBle instead."""
+    low = name.lower()
+    if "bluetooth" in low or "_ble" in low:
+        return 0
     if _looks_like_tankg(name):
         return 2
     low = name.lower()
@@ -139,17 +147,125 @@ def _find_selected(ports: tuple[str, str]) -> list[DeviceInfo]:
 
 
 def find_devices(ports: tuple[str, str] | None = None) -> list[DeviceInfo]:
-    """Manual selection (argument or saved setting) wins; otherwise automatic detection."""
+    """Manual selection (argument or saved setting) wins; otherwise automatic detection: USB first,
+    then the Bluetooth pedal saved in "Puerto MIDI…" (no radio scan here: it runs every 2 s)."""
+    from .library import Settings
+    settings = Settings()
     if ports is None:
-        from .library import Settings
-        ports = Settings().midi_ports
+        ports = settings.midi_ports
     if ports:
         return _find_selected(ports)
-    if sys.platform.startswith("linux"):
-        devs = _find_rawmidi()
-        if devs:
-            return devs
-    return _find_rtmidi()
+    devs = _find_rawmidi() if sys.platform.startswith("linux") else []
+    devs = devs or _find_rtmidi()
+    if not devs and settings.ble and ble_available():
+        name, address = settings.ble
+        devs = [DeviceInfo("ble", name, address)]
+    return devs
+
+
+def ble_available() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("bleak") is not None
+
+
+def scan_bluetooth(timeout: float = 6.0) -> list[DeviceInfo]:
+    """Nearby Tank-G pedals over Bluetooth LE (by name or by the editor service in the advert)."""
+    if not ble_available():
+        raise DeviceError("Falta la librería «bleak» para Bluetooth: pip install bleak")
+    import asyncio
+
+    from bleak import BleakScanner
+
+    async def scan():
+        return await BleakScanner.discover(timeout=timeout, return_adv=True)
+
+    try:
+        found = asyncio.run(scan())
+    except Exception as e:  # noqa: BLE001 - bleak raises backend-specific errors
+        raise DeviceError(f"No se pudo buscar por Bluetooth ({e}). ¿Está encendido el Bluetooth del PC?") from e
+    out = []
+    for dev, adv in found.values():
+        name = adv.local_name or dev.name or ""
+        if bleproto.SERVICE in [u.lower() for u in adv.service_uuids] or any(h in name.lower() for h in bleproto.NAME_HINTS):
+            out.append(DeviceInfo("ble", f"{name or dev.address} (Bluetooth)", dev.address))
+    return out
+
+
+class BleLink:
+    """bleak client on its own event-loop thread, with the same blocking read/write as the MIDI
+    transports (read returns whatever notifications arrived)."""
+
+    def __init__(self, address: str, timeout: float = 15.0):
+        if not ble_available():
+            raise DeviceError("Falta la librería «bleak» para Bluetooth: pip install bleak")
+        import asyncio
+        import threading
+
+        self._q: queue.Queue[bytes] = queue.Queue()
+        self.loop = asyncio.new_event_loop()
+        threading.Thread(target=self.loop.run_forever, daemon=True).start()
+        self.client = None
+        try:
+            self._call(self._connect(address, timeout), timeout + 5)
+        except Exception as e:  # noqa: BLE001 - bleak raises backend-specific errors
+            self.close()
+            raise DeviceError(f"No se pudo conectar por Bluetooth con {address} ({e}). ¿Está encendida y libre "
+                              "(sin la app del teléfono conectada)?") from e
+
+    def _call(self, coro, timeout: float):
+        import asyncio
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
+
+    async def _connect(self, address: str, timeout: float) -> None:
+        from bleak import BleakClient
+        if sys.platform.startswith("linux"):
+            # BlueZ: a pedal already known to the system is opened through its D-Bus object (fast, and
+            # works while it is connected and therefore not advertising); bleak scans otherwise.
+            from bleak.backends.device import BLEDevice
+            path = f"/org/bluez/hci0/dev_{address.upper().replace(':', '_')}"
+            try:
+                self.client = BleakClient(BLEDevice(address, None, {"path": path, "props": {}}), timeout=timeout)
+                await self.client.connect()
+            except Exception:  # noqa: BLE001 - unknown to BlueZ yet: fall back to scanning
+                self.client = None
+        if self.client is None:
+            self.client = BleakClient(address, timeout=timeout)
+            await self.client.connect()
+        acquire = getattr(getattr(self.client, "_backend", None), "_acquire_mtu", None)
+        if acquire:   # BlueZ reports MTU 23 until asked; the pedal accepts 247 (bank reads 8x faster)
+            try:
+                await acquire()
+            except Exception:  # noqa: BLE001 - keep the default MTU
+                pass
+        await self.client.start_notify(bleproto.RX, lambda _, data: self._q.put(bytes(data)))
+
+    def write(self, data: bytes) -> None:
+        size = max(20, (getattr(self.client, "mtu_size", 23) or 23) - 3)
+        try:
+            for i in range(0, len(data), size):
+                self._call(self.client.write_gatt_char(bleproto.TX, data[i:i + size], response=False), 5)
+        except Exception as e:  # noqa: BLE001
+            raise DeviceError(f"Error de escritura Bluetooth (¿desconectada?): {e}") from e
+
+    def read(self, timeout: float) -> bytes:
+        try:
+            data = self._q.get(timeout=max(timeout, 0))
+        except queue.Empty:
+            return b""
+        while True:
+            try:
+                data += self._q.get_nowait()
+            except queue.Empty:
+                return data
+
+    def close(self) -> None:
+        client, self.client = self.client, None
+        if client is not None:
+            try:
+                self._call(client.disconnect(), 5)
+            except Exception:  # noqa: BLE001 - closing must never raise
+                pass
+        self.loop.call_soon_threadsafe(self.loop.stop)
 
 
 def open_transport(info: DeviceInfo):
@@ -276,7 +392,8 @@ class TankG:
         error: DeviceError | None = None
         for cand in candidates:
             try:
-                dev = cls(open_transport(cand), cand)
+                dev = (TankGBle(BleLink(cand.address), cand) if cand.backend == "ble"
+                       else cls(open_transport(cand), cand))
             except DeviceError as e:
                 error = e
                 continue
@@ -377,3 +494,65 @@ class TankG:
         if bad:
             raise DeviceError(f"Verificación fallida en slots {bad}: la pedalera no guardó lo enviado.")
         return after
+
+
+class TankGBle(TankG):
+    """TankG over Bluetooth LE: same operations, bleproto framing (reads in blocks, ACKed writes)."""
+
+    def __init__(self, transport, info: DeviceInfo | None = None):
+        super().__init__(transport, info)
+        self._deframer = bleproto.Deframer()
+        self._pending: list[bleproto.Reply] = []
+
+    def _next_reply(self, deadline: float):
+        while True:
+            if self._pending:
+                return self._pending.pop(0)
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            self._pending = self._deframer.push(self.t.read(min(left, 0.2)))
+
+    def _ask(self, frame: bytes, accept, timeout: float = 1.5, retries: int = 3):
+        for _ in range(retries):
+            self._pending = []
+            self.t.write(frame)
+            deadline = time.monotonic() + timeout
+            while (reply := self._next_reply(deadline)) is not None:
+                result = accept(reply)
+                if result is not None:
+                    return result
+        return None
+
+    def read_mem(self, space: int, addr: int, length: int) -> bytes:
+        frame = bleproto.frame(bleproto.READ, space, addr, length)
+        data = self._ask(frame, lambda r: bleproto.read_reply_data(r, frame, length))
+        if data is None:
+            raise DeviceError("La pedalera no respondió por Bluetooth.")
+        return data
+
+    def write_mem(self, space: int, addr: int, data: bytes, what: str) -> None:
+        frame = bleproto.frame(bleproto.WRITE, space, addr, len(data), data)
+        ok = self._ask(frame, lambda r: True if r.cmd == bleproto.ACK_CMD and r.payload == b"\x00" else None,
+                       timeout=3.0, retries=1)
+        if not ok:
+            raise DeviceError(f"La pedalera no confirmó: {what}")
+
+    def read_bank(self, retries: int = 3) -> Bank:
+        data = b"".join(self.read_mem(bleproto.SPACE_BANK, a, min(bleproto.CHUNK, BANK_LEN - a))
+                        for a in range(0, BANK_LEN, bleproto.CHUNK))
+        try:
+            return Bank.from_bytes(data)
+        except ValueError as e:
+            raise DeviceError(f"El dispositivo respondió pero no parece una Tank-G: {e}") from e
+
+    def write_preset(self, slot: int, preset: Preset) -> None:
+        if not 0 <= slot < SLOTS:
+            raise ValueError("slot out of range")
+        self.write_mem(bleproto.SPACE_BANK, Bank.record_offset(slot), preset.to_bytes(), f"escritura del preset {slot}")
+        self.write_mem(bleproto.SPACE_COMMIT, 0, b"", "commit")
+
+    def select_preset(self, slot: int) -> None:
+        if not 0 <= slot < SLOTS:
+            raise ValueError("slot out of range")
+        self.t.write(bleproto.frame(bleproto.WRITE, bleproto.SPACE_SELECT, slot, 1, b"\x01"))

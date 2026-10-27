@@ -124,7 +124,8 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
 
 ## Android (teléfono y tablet)
 
-App para Android 6+ con la pedalera conectada por **USB-OTG**: misma pedalera virtual que en el PC
+App para Android 6+ con la pedalera conectada por **USB-OTG** o, en la Tank-G v2, por **Bluetooth**
+(emparéjala en los ajustes de Android; la app se conecta sola al abrirse): misma pedalera virtual que en el PC
 (faders, módulos, interruptores A–D que activan el preset), biblioteca de sonidos, subida con
 progreso y verificación, backups (se descargan como `.tgbank` en Descargas) y modo demo.
 Se adapta sola: en teléfono, vista compacta; en tablet o pantalla grande, la disposición del
@@ -137,8 +138,12 @@ android/build.sh debug    # dist/TankG-debug.apk (inspeccionable con chrome://in
 
 Se compila sin Gradle (aapt2 + javac + d8 + apksigner). La clave de firma se crea la primera vez en
 `~/.local/share/tankg/android-release.jks` (+ `.pass`): **guárdala**, Android solo instala
-actualizaciones firmadas con la misma clave. La interfaz es la misma que `web/` (también funciona
-en Chrome con Web MIDI); los datos de presets se generan con `tools/export_web.py`.
+actualizaciones firmadas con la misma clave. La interfaz está en `android/ui/`; los datos de presets
+se generan con `tools/export_ui.py`.
+
+**Bluetooth en Windows/Linux (Tank-G v2):** Pedalera → Puerto MIDI… → «Bluetooth» → Buscar, elige la
+pedalera y Guardar. Se usa cuando no hay una conectada por USB. La pedalera acepta una sola conexión:
+cierra la app del teléfono antes.
 
 ## No soportado (todavía)
 

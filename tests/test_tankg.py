@@ -4,7 +4,7 @@ import pytest
 
 from tankg import library, sysex
 from tankg.device import COMMIT_FRAME, DeviceError, TankG
-from tankg.model import BANK_LEN, Bank, parse_slot, slot_name
+from tankg.model import BANK_LEN, Bank, Preset, parse_slot, slot_name
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
@@ -432,7 +432,7 @@ def test_updater_versions_and_checksums(monkeypatch):
 
 def test_version_matches_web_and_android():
     from tankg.version import __version__
-    assert f'export const VERSION = "{__version__}"' in (ROOT / "web/js/data.js").read_text(encoding="utf-8")
+    assert f'export const VERSION = "{__version__}"' in (ROOT / "android/ui/js/data.js").read_text(encoding="utf-8")
     assert "tankg/version.py" in (ROOT / "android/build.sh").read_text()
 
 
@@ -471,3 +471,73 @@ def test_prompts_fit_in_claude_desktop_prefill():
     limit = ai.CHAT_APPS["Claude"]["limit"]
     for bank in (False, True):
         assert len(ai.web_prompt("x" * 120, ai.INSTRUMENTS[0], bank)) <= limit
+
+
+# Bluetooth LE framing: frames captured from the official app on 2026-10-27 (same as tests/ui)
+REC_9D = bytes.fromhex("010001011e07643e483c5f0000143c320f04ff0078")
+
+
+def test_ble_golden_frames():
+    from tankg import bleproto as b
+    assert b.frame(b.READ, 2, 0, 4).hex(" ") == "00 59 23 08 00 00 04 00 00 00 20 04 00 00 d7"
+    assert b.frame(b.WRITE, 0, 2 + 21 * 35, 21, REC_9D).hex(" ") == (
+        "00 59 22 1d 00 00 04 e1 02 00 00 15 00 00 01 00 01 01 1e 07 64 3e 48 3c 5f 00 00 14 3c 32 0f 04 ff 00 78 4a")
+    assert b.frame(b.WRITE, 0xF, 0, 0).hex(" ") == "00 59 22 08 00 00 04 00 00 00 f0 00 00 00 0b"
+    assert b.frame(b.WRITE, 0xE, 35, 1, b"\x01").hex(" ") == "00 59 22 09 00 00 04 23 00 00 e0 01 00 00 01 f6"
+    d = b.Deframer()
+    reply = bytes.fromhex("0059231d000004e1020000150000010001011e07643e483c5f0000143c320f04ff00784a")
+    assert d.push(b"\x7f" + reply[:10]) == []
+    (r,) = d.push(reply[10:])
+    assert r.cmd == 0x23 and r.payload[8:] == REC_9D
+
+
+class FakeBlePedal:
+    """Speaks the captured Bluetooth framing; replies arrive split like notifications."""
+
+    def __init__(self, image: bytes):
+        from tankg import bleproto
+        self.mem = bytearray(image)
+        self.out = bytearray()
+        self.sent: list[bytes] = []
+        self.deframer = bleproto.Deframer()
+
+    def write(self, data: bytes) -> None:
+        self.sent.append(bytes(data))
+        for f in self.deframer.push(data):
+            f1, f2 = int.from_bytes(f.payload[0:4], "little"), int.from_bytes(f.payload[4:8], "little")
+            addr, length, space = f1 >> 8, f2 >> 8, (f2 >> 4) & 0xF
+            if f.cmd == 0x23:
+                payload = f.payload[:8] + bytes(self.mem[addr:addr + length])
+                self.out += b"\x00\x59\x23" + len(payload).to_bytes(2, "little") + b"\x00" + payload + bytes([(0xFF - sum(payload)) & 0xFF])
+            else:
+                if space == 0 and length:
+                    self.mem[addr:addr + length] = f.payload[8:]
+                self.out += bytes.fromhex("00 59 00 01 00 00 00 ff")
+
+    def read(self, timeout: float) -> bytes:
+        data, self.out = bytes(self.out[:40]), self.out[40:]   # small chunks
+        return data
+
+    def close(self) -> None:
+        pass
+
+
+def test_tankg_ble_read_write_select():
+    from tankg.device import TankGBle
+    pedal = FakeBlePedal(LIVE)
+    dev = TankGBle(pedal)
+    bank = dev.read_bank()
+    assert bank.to_bytes() == LIVE
+    target = bank.copy()
+    target.presets[35] = Preset(bytearray(REC_9D))
+    after = dev.write_presets(target, [35])
+    assert after.presets[35].to_bytes() == REC_9D
+    assert any(s.hex(" ") == "00 59 22 08 00 00 04 00 00 00 f0 00 00 00 0b" for s in pedal.sent)
+    dev.select_preset(35)
+    assert pedal.sent[-1].hex(" ") == "00 59 22 09 00 00 04 23 00 00 e0 01 00 00 01 f6"
+
+
+def test_bluetooth_midi_ports_are_not_used_for_sysex():
+    from tankg import device
+    assert device._port_score("TANK-Gv2_BLE:TANK-Gv2_BLE Bluetooth 128:0") == 0
+    assert device._port_score("USB Composite Device 28:0") == 2

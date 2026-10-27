@@ -1,4 +1,4 @@
-// "Crear con IA" for the web/Android app: a port of the runtime part of tankg/ai.py. The prompt,
+// "Crear con IA" for the Android app: a port of the runtime part of tankg/ai.py. The prompt,
 // schemas, instructions and provider list come from data.js (generated from ai.py), so a prompt
 // change in Python reaches every platform; only the request/parsing code lives here.
 import { AI, FIELDS } from "./data.js";
@@ -98,18 +98,9 @@ export function fromText(text, bank, likes) {
 
 // API mode -----------------------------------------------------------------------------------
 
-/** POST JSON. Inside the APK it goes through the native bridge (no CORS, local servers work). */
+/** POST JSON through the APK's native bridge (no CORS limits, local servers work). */
 async function post(url, headers, body) {
-  let status, text;
-  if (globalThis.AndroidMidi?.httpPost) {
-    ({ status, text } = await androidPost(url, headers, body));
-  } else {
-    let r;
-    try { r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }); }
-    catch { throw new AIError(`No se pudo conectar con ${url}.`); }
-    status = r.status;
-    text = await r.text();
-  }
+  const { status, text } = await androidPost(url, headers, body);
   if (status === 0) throw new AIError(`No se pudo conectar con ${url}: ${text}`);
   let data = null;
   try { data = JSON.parse(text); } catch { /* not JSON */ }
@@ -141,7 +132,7 @@ const withoutLimits = s => (Array.isArray(s) ? s.map(withoutLimits) : s && typeo
 async function askClaude(cfg, prompt, bank) {
   const schema = bank ? AI.bankSchema : AI.schema, tool = bank ? "crear_banco" : "crear_preset";
   const data = await post(`${cfg.baseUrl}/v1/messages`,
-    { "x-api-key": cfg.key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+    { "x-api-key": cfg.key, "anthropic-version": "2023-06-01" },
     { model: cfg.model, max_tokens: bank ? 8192 : 2048, system: AI.system,
       tools: [{ name: tool, description: "Devuelve el resultado para la Tank-G", input_schema: schema }],
       tool_choice: { type: "tool", name: tool }, messages: [{ role: "user", content: prompt }] });

@@ -1,10 +1,10 @@
-// Run by tests/test_web.py: argv[2] is a JSON file written by Python with expected outputs of
+// Run by tests/test_ui.py: argv[2] is a JSON file written by Python with expected outputs of
 // tankg/ai.py and tankg/library.py. Prints the JS-written files so Python can load them back.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyDesign, fromText, webPrompt } from "../../web/js/ai.js";
-import { parsePresetFile, parseSetFile, presetFile, setFile } from "../../web/js/files.js";
-import { Bank, fromHex, toHex } from "../../web/js/protocol.js";
+import { applyDesign, fromText, webPrompt } from "../../android/ui/js/ai.js";
+import { parsePresetFile, parseSetFile, presetFile, setFile } from "../../android/ui/js/files.js";
+import { Bank, fromHex, toHex } from "../../android/ui/js/protocol.js";
 
 const g = JSON.parse(readFileSync(process.argv[2], "utf8"));
 for (const c of g.designs) assert.equal(toHex(applyDesign(c.design, c.like ? fromHex(c.like) : null)), c.expect, JSON.stringify(c.design));

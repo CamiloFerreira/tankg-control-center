@@ -603,7 +603,33 @@ class MidiPortDialog(StyledDialog):
         row.addWidget(self.port_info, 1)
         row.addWidget(refresh)
         l2.addLayout(row)
-        _, l3 = self.card("3", "Comprobar")
+        _, lb = self.card("3", "Bluetooth (Tank-G v2)")
+        hb = QLabel("Sin cable: busca la pedalera por Bluetooth. Se usa cuando no hay una conectada por USB. "
+                    "Desconecta antes la app del teléfono: la pedalera acepta una sola conexión.")
+        hb.setObjectName("hint")
+        hb.setWordWrap(True)
+        lb.addWidget(hb)
+        rowb = QHBoxLayout()
+        self.ble_combo = QComboBox()
+        self.ble_combo.setMinimumWidth(260)
+        saved_ble = self.settings.ble
+        self.ble_combo.addItem("(ninguna)", None)
+        if saved_ble:
+            self.ble_combo.addItem(saved_ble[0], saved_ble)
+            self.ble_combo.setCurrentIndex(1)
+        self.scan_btn = QPushButton("Buscar")
+        self.scan_btn.setCursor(Qt.PointingHandCursor)
+        self.scan_btn.clicked.connect(self.scan_ble)
+        self.ble_state = QLabel()
+        self.ble_state.setObjectName("hint")
+        rowb.addWidget(self.ble_combo, 1)
+        rowb.addWidget(self.scan_btn)
+        lb.addLayout(rowb)
+        lb.addWidget(self.ble_state)
+        if not device.ble_available():
+            self.scan_btn.setEnabled(False)
+            self.status(self.ble_state, "Falta la librería «bleak» (pip install bleak).", False)
+        _, l3 = self.card("4", "Comprobar")
         row3 = QHBoxLayout()
         test = QPushButton("Probar conexión")
         test.setCursor(Qt.PointingHandCursor)
@@ -670,11 +696,36 @@ class MidiPortDialog(StyledDialog):
         finally:
             QApplication.restoreOverrideCursor()
 
+    def scan_ble(self) -> None:
+        self.scan_btn.setEnabled(False)
+        self.status(self.ble_state, "Buscando pedaleras Bluetooth… (unos segundos)")
+
+        def done(found) -> None:
+            self.scan_btn.setEnabled(True)
+            current = self.ble_combo.currentData()
+            self.ble_combo.clear()
+            self.ble_combo.addItem("(ninguna)", None)
+            for info in found:
+                self.ble_combo.addItem(info.name, (info.name, info.address))
+            if found:
+                self.ble_combo.setCurrentIndex(1)
+            elif current:
+                self.ble_combo.addItem(current[0], current)
+            self.status(self.ble_state, f"{len(found)} pedalera(s) encontrada(s)." if found else
+                        "No se encontró ninguna. ¿Está encendida y sin la app del teléfono conectada?", bool(found))
+
+        def failed(msg: str) -> None:
+            self.scan_btn.setEnabled(True)
+            self.status(self.ble_state, msg, False)
+
+        self.main._background(device.scan_bluetooth, done, failed)
+
     def save(self) -> None:
         if self.manual.isChecked() and self._chosen() is None:
             self.status(self.result, "Elige un puerto de entrada y uno de salida.", False)
             return
         self.settings.set_midi_ports(self._chosen())
+        self.settings.set_ble(self.ble_combo.currentData())
         self.accept()
 
 

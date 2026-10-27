@@ -1,5 +1,5 @@
 """Self-update of the desktop executables from the public releases repository
-(tankg.version.RELEASES_REPO). The APK does the same through web/js/app.js + MainActivity.
+(tankg.version.RELEASES_REPO). The APK does the same through android/ui/js/app.js + MainActivity.
 
 Only the PyInstaller builds replace themselves; running from source just reports the new
 version. Every download is checked against the release's SHA256SUMS before it is used.

@@ -99,7 +99,7 @@ class Background(QRunnable):
     def run(self) -> None:
         try:
             self.signals.done.emit(self.fn())
-        except updater.UpdateError as e:
+        except (updater.UpdateError, DeviceError) as e:
             self.signals.failed.emit(str(e))
         except Exception:  # noqa: BLE001 - surface unexpected errors to the user
             self.signals.failed.emit(traceback.format_exc())

@@ -11,21 +11,21 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
 
-def test_web_data_is_current():
-    import export_web
-    current = export_web.OUT.read_text(encoding="utf-8").replace("\r\n", "\n")   # Windows checkouts may use CRLF
-    assert current == export_web.render(), \
-        "web/js/data.js desactualizado: ejecuta tools/export_web.py"
+def test_ui_data_is_current():
+    import export_ui
+    current = export_ui.OUT.read_text(encoding="utf-8").replace("\r\n", "\n")   # Windows checkouts may use CRLF
+    assert current == export_ui.render(), \
+        "android/ui/js/data.js desactualizado: ejecuta tools/export_ui.py"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-def test_web_protocol():
-    r = subprocess.run(["node", str(ROOT / "tests/web/protocol.test.mjs")], capture_output=True, text=True, timeout=60)
+def test_ui_protocol():
+    r = subprocess.run(["node", str(ROOT / "tests/ui/protocol.test.mjs")], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr + r.stdout
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-def test_web_ai_and_files_match_python(tmp_path):
+def test_ui_ai_and_files_match_python(tmp_path):
     """Same apply_design, browser prompt and interchangeable .tgpreset/.tgset files in JS and Python."""
     import json
     from tankg import ai, artists, library
@@ -55,7 +55,7 @@ def test_web_ai_and_files_match_python(tmp_path):
               "setRaws": [bank.presets[s].to_bytes().hex() for s in range(8, 12)], "bank": live.hex()}
     gfile = tmp_path / "golden.json"
     gfile.write_text(json.dumps(golden, ensure_ascii=False), encoding="utf-8")
-    r = subprocess.run(["node", str(ROOT / "tests/web/parity.test.mjs"), str(gfile)], capture_output=True, text=True,
+    r = subprocess.run(["node", str(ROOT / "tests/ui/parity.test.mjs"), str(gfile)], capture_output=True, text=True,
                        encoding="utf-8", timeout=60)
     assert r.returncode == 0, r.stderr + r.stdout
     out = json.loads(r.stdout)

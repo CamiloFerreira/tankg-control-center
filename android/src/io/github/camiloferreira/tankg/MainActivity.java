@@ -53,7 +53,7 @@ import java.security.MessageDigest;
 import java.util.Iterator;
 
 /**
- * Tank-G Control for Android: the web app (assets/web, same files as the repo's web/ folder)
+ * Tank-G Control for Android: the UI of android/ui (packed as assets/web)
  * in a WebView, plus a bridge to android.media.midi so the page can talk to the pedal over
  * USB-OTG. The page is served from https://appassets.androidplatform.net so ES modules and
  * localStorage work like on a normal secure origin.
