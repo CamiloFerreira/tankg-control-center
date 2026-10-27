@@ -60,7 +60,7 @@ import java.util.Iterator;
  *
  * Bridge (window.AndroidMidi): list() -> JSON [{id, name}], open(id) -> __midiOpened(id, ok, err),
  * send(hex), close(), saveFile(name, base64, mime), httpPost(id, url, headers, body) ->
- * __httpDone(id, status, text), openUrl(url), copyText(text), version(),
+ * __httpDone(id, status, text), openUrl(url), openChat(package, url), copyText(text), version(),
  * installUpdate(apkUrl, sumsUrl) -> __updateState(state, detail) (refuses an APK not in SHA256SUMS). Incoming complete SysEx frames ->
  * __midiIn(hex); device plug/unplug -> __midiState(state, name). <input type=file> opens the
  * system file picker.
@@ -310,6 +310,28 @@ public class MainActivity extends Activity {
                     // no browser installed
                 }
             });
+        }
+
+        /** Opens the chat in the AI service's app when installed (a new chat if it takes the link),
+         *  otherwise in the browser. Returns "app" or "web". */
+        @JavascriptInterface
+        public String openChat(String pkg, String url) {
+            PackageManager pm = getPackageManager();
+            Intent intent = null;
+            if (!pkg.isEmpty()) {
+                Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(pkg);
+                intent = view.resolveActivity(pm) != null ? view : pm.getLaunchIntentForPackage(pkg);
+            }
+            String where = intent != null ? "app" : "web";
+            Intent chosen = intent != null ? intent : new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            ui.post(() -> {
+                try {
+                    startActivity(chosen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception e) {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                }
+            });
+            return where;
         }
 
         @JavascriptInterface

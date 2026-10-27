@@ -10,6 +10,14 @@
     <!-- self-update: the system still asks the user to confirm every install -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- chat apps opened by "Copiar y abrir chat" when installed (Android 11+ package visibility);
+         keep in sync with CHAT_APPS in tankg/ai.py (checked by tests) -->
+    <queries>
+        <package android:name="com.anthropic.claude" />
+        <package android:name="com.openai.chatgpt" />
+        <package android:name="com.google.android.apps.bard" />
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"

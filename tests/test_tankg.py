@@ -448,3 +448,16 @@ def test_json_files_are_utf8_and_read_old_ansi(tmp_path):
     old = tmp_path / "old.tgset"   # written by a pre-1.5 Windows build (ANSI code page)
     old.write_bytes((tmp_path / "s.tgset").read_text(encoding="utf-8").encode("cp1252"))
     assert library.load_set(old)[0] == "Año"
+
+
+def test_open_chat_prefers_registered_app(monkeypatch):
+    from tankg import chatapps
+    opened = []
+    monkeypatch.setattr(chatapps, "scheme_handler", lambda scheme: scheme == "claude")
+    monkeypatch.setattr(chatapps.subprocess, "Popen", lambda args, **kw: opened.append(args))
+    monkeypatch.setattr(chatapps.os, "startfile", lambda link: opened.append(link), raising=False)
+    web = []
+    assert chatapps.open_chat("Claude", web.append) == "app" and not web
+    assert "claude://claude.ai/new" in str(opened[-1])
+    assert chatapps.open_chat("ChatGPT", web.append) == "web" and web == ["https://chatgpt.com/"]
+    assert chatapps.open_chat("Gemini", web.append) == "web"

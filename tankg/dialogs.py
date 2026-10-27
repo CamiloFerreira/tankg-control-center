@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import ai, artists, device, library
+from . import ai, artists, chatapps, device, library
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, FIELDS, OFF_COLOR, REC_LEN, Bank, slot_name, zone_of
 from .theme import ERROR, OK, TEXT, TEXT_DIM
 
@@ -1123,10 +1123,11 @@ class AIDialog(StyledDialog):
         QApplication.clipboard().setText(ai.web_prompt(text, self.instrument.currentText(), self._bank()))
         self.waiting_clipboard = True
         self.apply_btn.setEnabled(False)
-        QDesktopServices.openUrl(QUrl(ai.WEB_SITES[self._site()]))
+        where = chatapps.open_chat(self._site(), lambda url: QDesktopServices.openUrl(QUrl(url)))
         self._set_step(1)
-        self._show_empty(f"Esperando la respuesta de {self._site()}…\nPega con Ctrl+V en el chat, envía y "
-                         "copia la respuesta.")
+        self._show_empty(f"Esperando la respuesta de {self._site()}"
+                         f"{' (app de escritorio)' if where == 'app' else ''}…\nPega con Ctrl+V en el chat, "
+                         "envía y copia la respuesta.")
 
     def _clipboard_changed(self) -> None:
         if not self.waiting_clipboard or self.main.local is None:

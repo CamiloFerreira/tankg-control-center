@@ -22,6 +22,14 @@ WEB_SITES = {
     "ChatGPT": "https://chatgpt.com/",
     "Gemini": "https://gemini.google.com/app",
 }
+# Native chat apps opened instead of the browser when installed. Android: package names (they must
+# also be listed in <queries> of android/AndroidManifest.xml). Desktop: link opened when the system
+# has a handler for its scheme ("claude://claude.ai/new" is the "New chat" action of Claude Desktop).
+CHAT_APPS = {
+    "Claude": {"android": "com.anthropic.claude", "desktop": "claude://claude.ai/new"},
+    "ChatGPT": {"android": "com.openai.chatgpt", "desktop": "chatgpt://"},
+    "Gemini": {"android": "com.google.android.apps.bard", "desktop": ""},
+}
 
 PROVIDERS = {
     "claude": {"label": "Claude (Anthropic)", "model": "claude-sonnet-5-5",

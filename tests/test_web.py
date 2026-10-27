@@ -66,3 +66,13 @@ def test_web_ai_and_files_match_python(tmp_path):
     title, items = library.load_set(tmp_path / "js.tgset")
     assert title == "Mi banco" and [p for p, _ in items] == bank.presets[4:8] and items[1][1] is None
     assert isinstance(items[0][0], Preset)
+
+
+def test_chat_apps_declared_in_android_manifest():
+    """Android 11+ only lets the APK see the chat apps listed in <queries>."""
+    from tankg import ai
+    manifest = (ROOT / "android/AndroidManifest.xml").read_text(encoding="utf-8")
+    for site, app in ai.CHAT_APPS.items():
+        assert site in ai.WEB_SITES
+        if app["android"]:
+            assert f'<package android:name="{app["android"]}" />' in manifest, site

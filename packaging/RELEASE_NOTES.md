@@ -13,15 +13,11 @@ No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
 ## Novedades
 
-- **Se actualiza sola:** al abrirla, la app avisa si hay una versión nueva y la instala (Windows,
-  Linux y Android; en Android el sistema pide confirmar). Desde esta versión ya no hace falta
-  descargar a mano. Cada descarga se comprueba con `SHA256SUMS`.
-- **Android al nivel del escritorio:** menú completo (Pedalera, Editar, Archivo), pulsación larga en
-  un preset, copiar/pegar/duplicar/intercambiar, nombres de banco, restaurar de fábrica, escucha en
-  vivo, backups, abrir/guardar bancos, importar/exportar presets y bancos (`.tgpreset`, `.tgset`,
-  compatibles con el PC), comparar, puerto MIDI, asistente de calibración y **Crear con IA**.
-- **Corrección:** en Windows los nombres con tildes o «ñ» de los archivos `.tgpreset`/`.tgset` se
-  guardaban con otra codificación; ahora son UTF-8 en todas las plataformas.
+- **«Copiar y abrir chat» abre la app de la IA si la tienes instalada:** en Android, las apps de
+  Claude, ChatGPT o Gemini; en el PC, Claude Desktop (o la app de ChatGPT si registra su enlace).
+  Si no están, se abre la página web como antes. Las instrucciones quedan copiadas igual.
+
+Si tienes la 1.5.0, esta versión te llega sola: la app avisa al abrirla.
 
 ## Verificar la descarga
 
