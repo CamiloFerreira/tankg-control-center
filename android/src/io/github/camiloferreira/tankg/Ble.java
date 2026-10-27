@@ -11,6 +11,8 @@ import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -41,6 +43,7 @@ class Ble {
     private BluetoothGattCharacteristic tx;
     private int mtu = 23;
     private volatile boolean ready;
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     Ble(Context ctx, Js js) {
         this.ctx = ctx;
@@ -76,16 +79,33 @@ class Ble {
     }
 
     void open(String address) {
+        boolean hadLink = gatt != null;
         close();
         BluetoothAdapter a = adapter();
         if (a == null || !a.isEnabled()) {
             state("error", "Bluetooth apagado");
             return;
         }
+        // After close() Android keeps the radio link about one second and then drops it: a new
+        // connection made before that rides the dying link and gets no notifications.
+        if (hadLink) handler.postDelayed(() -> connect(a, address), 2000);
+        else connect(a, address);
+    }
+
+    private void connect(BluetoothAdapter a, String address) {
         gatt = a.getRemoteDevice(address).connectGatt(ctx, false, new BluetoothGattCallback() {
+            // Android may repeat "connected" / "MTU changed" on a reconnection: each step runs once.
+            private boolean mtuAsked, discovering, subscribed;
+
             @Override
             public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
-                if (newState == BluetoothProfile.STATE_CONNECTED) g.requestMtu(247);
+                if (g != gatt) {   // a previous connection closing: not ours to report
+                    if (newState == BluetoothProfile.STATE_DISCONNECTED) g.close();
+                    return;
+                }
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    if (!mtuAsked) { mtuAsked = true; g.requestMtu(247); }
+                }
                 else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     boolean was = ready;
                     ready = false;
@@ -97,12 +117,15 @@ class Ble {
 
             @Override
             public void onMtuChanged(BluetoothGatt g, int newMtu, int status) {
+                if (g != gatt) return;
                 mtu = newMtu;
-                g.discoverServices();
+                if (!discovering) { discovering = true; g.discoverServices(); }
             }
 
             @Override
             public void onServicesDiscovered(BluetoothGatt g, int status) {
+                if (g != gatt || subscribed) return;
+                subscribed = true;
                 BluetoothGattService s = g.getService(SERIAL);
                 if (s == null) {
                     state("error", "la pedalera no ofrece el servicio de edición");
@@ -118,17 +141,36 @@ class Ble {
                     return;
                 }
                 d.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                if (!g.writeDescriptor(d)) state("error", "no se pudo activar las notificaciones");
+                subscribe(g, d, 0);
+            }
+
+            private void subscribe(BluetoothGatt g, BluetoothGattDescriptor d, int attempt) {
+                if (g != gatt) return;
+                if (g.writeDescriptor(d)) {
+                    // On a reconnection the confirmation sometimes never arrives although notifications
+                    // work (the bonded pedal keeps them on); the bank read that follows proves the link.
+                    handler.postDelayed(() -> {
+                        if (g == gatt && !ready) {
+                            ready = true;
+                            state("ready", String.valueOf(mtu));
+                        }
+                    }, 1500);
+                    return;
+                }
+                if (attempt < 10) handler.postDelayed(() -> subscribe(g, d, attempt + 1), 150);
+                else state("error", "no se pudo activar las notificaciones");
             }
 
             @Override
             public void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor d, int status) {
+                if (g != gatt) return;
                 ready = status == BluetoothGatt.GATT_SUCCESS;
                 state(ready ? "ready" : "error", ready ? String.valueOf(mtu) : "notificaciones: estado " + status);
             }
 
             @Override
             public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c) {
+                if (g != gatt) return;
                 js.call("window.__bleIn&&__bleIn('" + hex(c.getValue()) + "')");
             }
         }, BluetoothDevice.TRANSPORT_LE);

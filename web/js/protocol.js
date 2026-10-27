@@ -236,13 +236,15 @@ export class TankGBle {
     });
   }
 
-  async read(space, addr, len) {
+  async read(space, addr, len, retries = 3) {   // a radio link drops a reply now and then: retry like USB
     const frame = bleFrame(BLE_READ, space, addr, len);
     const echo = Array.from(frame.slice(6, 14));
-    const data = await this.transact(frame, f => (f.cmd === BLE_READ && f.payload.length === 8 + len &&
-      echo.every((b, i) => f.payload[i] === b) ? f.payload.slice(8) : null));
-    if (!data) throw new DeviceError("La pedalera no respondió por Bluetooth.");
-    return data;
+    for (let i = 0; i < retries; i++) {
+      const data = await this.transact(frame, f => (f.cmd === BLE_READ && f.payload.length === 8 + len &&
+        echo.every((b, j) => f.payload[j] === b) ? f.payload.slice(8) : null), 1500);
+      if (data) return data;
+    }
+    throw new DeviceError("La pedalera no respondió por Bluetooth.");
   }
 
   async write(space, addr, data, what) {
@@ -331,7 +333,14 @@ export function androidBluetoothPedals() {
   return JSON.parse(A.blePedals());
 }
 
-async function openAndroidBle(pedal) {
+let bleOpening = null;
+/** One Bluetooth connection attempt at a time: a second open would close the first link. */
+function openAndroidBle(pedal) {
+  if (!bleOpening) bleOpening = connectAndroidBle(pedal).finally(() => { bleOpening = null; });
+  return bleOpening;
+}
+
+async function connectAndroidBle(pedal) {
   const A = globalThis.AndroidMidi;
   const state = await new Promise(resolve => {
     bleWaiters.push(resolve);

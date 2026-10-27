@@ -1216,8 +1216,14 @@ function wire() {
     $("portState").textContent = "Probando…";
     if (S.busy) { $("portState").textContent = "Hay una operación en curso."; return; }
     S.busy = true;
+    const port = chosenPort();
+    if (S.dev && !S.demo && (port === "" || port === S.dev.portName)) {   // already talking to it: don't cut the link
+      S.busy = false;
+      $("portState").textContent = `✓ Tank-G conectada en «${S.dev.portName}».`;
+      return;
+    }
     try {
-      const dev = await openMidi(chosenPort());   // on Android this replaces the open device
+      const dev = await openMidi(port);   // on Android this replaces the open device
       $("portState").textContent = `✓ Tank-G encontrada en «${dev.portName}».`;
       const fromDemo = S.demo;
       S.dev = dev;
@@ -1225,7 +1231,10 @@ function wire() {
       watchPorts(dev.access);
       adoptBank(dev.bank, fromDemo);
       render();
-    } catch (e) { $("portState").textContent = `✗ ${e.message}`; } finally { S.busy = false; }
+    } catch (e) {
+      $("portState").textContent = `✗ ${e.message}`;
+      if (ANDROID && S.dev && !S.demo) { S.dev = null; render(); }   // the old link was closed by the attempt
+    } finally { S.busy = false; }
   };
   $("portSave").onclick = () => {
     store.set("tankg.port", chosenPort());

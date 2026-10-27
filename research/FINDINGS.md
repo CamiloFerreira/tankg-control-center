@@ -138,3 +138,28 @@ MASTER es global.
 Límites de los 3 tramos: se asumen tercios iguales (sin calibrar).
 Calibración propuesta: en modo LIVE mover una sola perilla, guardar (mantener A/B/C/D) en un slot,
 leer el banco y comparar con el backup.
+
+## 5. Bluetooth LE (TANK-Gv2) [VERIFICADO 2026-10-27]
+
+La pedalera anuncia **«TANK-Gv2_BLE»** (firmware «TANK-Gv2_097» según su respuesta de identificación).
+Servicios GATT: `ae40` (serie Jieli: `ae41` write-without-response, `ae42` notify), BLE-MIDI estándar
+(`03b80e5a…`, char `7772e5db…`) y GAP.
+
+- BLE-MIDI: acepta mensajes de canal (Program Change cambió el preset, confirmado en el display)
+  pero **no responde al SysEx** del protocolo USB. [VERIFICADO]
+- El editor oficial M-EFCS usa `ae41`/`ae42` con un framing propio (capturado con el registro HCI
+  de Android y `tools/btsnoop_att.py`):
+
+```
+00 59 | cmd | len u16 LE | 00 | f1 u32 LE | f2 u32 LE | datos | ck     ck = 0xFF - Σ(f1, f2, datos)
+f1 = addr << 8 | 4          f2 = len << 8 | space << 4     (mismo mapa de memoria que por USB)
+cmd 23 leer  -> respuesta cmd 23 con f1 f2 de eco + datos
+cmd 22 escribir -> ACK 00 59 00 01 00 00 00 ff
+space 0 banco (addr 2 + 21·slot), F commit (len 0), E seleccionar preset (addr = slot, dato 01),
+1 preset en edición (lo que usa M-EFCS en vivo), 2 estado (4 bytes: banco, banco, letra, 01), D info
+cmd 11 identificación -> «TANK-Gv2_097»
+```
+
+Verificado con la app: banco completo leído en bloques de 200 bytes (~210 ms), escritura de presets
++ commit con relectura, selección. Notas de Android: tras `close()` el enlace físico sigue ~1 s;
+reconectar antes falla (sin notificaciones), por eso `Ble.java` espera 2 s.
