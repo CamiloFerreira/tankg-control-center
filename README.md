@@ -1,11 +1,28 @@
 # Tank-G Control Center
 
-Gestor de presets para la pedalera **M-VAVE Tank-G** en **Linux y Windows**. Habla el protocolo
-SysEx del editor oficial M-EFCS directamente por USB-MIDI (la pedalera es class-compliant: no
-necesita drivers).
+Gestor de presets para la pedalera **M-VAVE Tank-G** en **Windows, Linux y Android** (teléfono y
+tablet). Habla el protocolo del editor oficial M-EFCS directamente por **USB-MIDI** (la pedalera es
+class-compliant: no necesita drivers) y, en la Tank-G v2, por **Bluetooth**.
 
-- Linux: ALSA rawmidi (`/dev/snd/midiC*D0`), sin dependencias MIDI.
-- Windows / macOS: `python-rtmidi` (se instala solo).
+<p align="center">
+  <img src="docs/img/android-demo.gif" width="300" alt="La app en Android: interruptores, faders, biblioteca y subida de un banco">
+  &nbsp;
+  <img src="docs/img/desktop-main.png" width="520" alt="Ventana principal en el escritorio">
+</p>
+
+| Biblioteca de sonidos | Crear con IA | Subida con verificación |
+|---|---|---|
+| ![Biblioteca](docs/img/desktop-library.png) | ![IA](docs/img/desktop-ai.png) | ![Subida](docs/img/desktop-upload.png) |
+
+| Android: pedalera | Biblioteca | Crear con IA | Menú |
+|---|---|---|---|
+| ![](docs/img/android-pedal.png) | ![](docs/img/android-library-bank.png) | ![](docs/img/android-ai.png) | ![](docs/img/android-menu.png) |
+
+![Android en tablet](docs/img/android-tablet.png)
+
+- Linux: ALSA rawmidi (`/dev/snd/midiC*D0`), sin dependencias MIDI; Bluetooth con BlueZ.
+- Windows: `python-rtmidi` y Bluetooth con WinRT (se instalan solos).
+- Android 6+: USB-OTG o Bluetooth, sin permisos especiales.
 
 ## Ejecutable (sin Python)
 

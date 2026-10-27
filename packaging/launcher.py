@@ -9,6 +9,8 @@ if sys.platform.startswith("linux") and getattr(sys, "frozen", False):
         os.environ["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH_ORIG"]
     else:
         os.environ.pop("LD_LIBRARY_PATH", None)
+    # The bundled GLib must not load the system's GIO modules (gvfs), built against a newer GLib.
+    os.environ.setdefault("GIO_MODULE_DIR", os.path.join(getattr(sys, "_MEIPASS", ""), "gio-modules"))
 
 from tankg.__main__ import run  # noqa: E402
 

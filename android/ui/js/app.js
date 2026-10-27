@@ -118,7 +118,7 @@ function makeFader(key) {
     if (v !== get(key)) { setField(key, v, false); paintFader(el, v); }
   };
   track.onpointerdown = e => {
-    track.setPointerCapture(e.pointerId);
+    try { track.setPointerCapture(e.pointerId); } catch { /* synthetic events have no pointer to capture */ }
     pushUndo();
     start = { y: e.clientY, v: get(key), h: track.clientHeight };
     track.classList.add("active");
