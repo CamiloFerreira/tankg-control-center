@@ -31,6 +31,21 @@ FACTORY_CANDIDATES = [
 ]
 
 
+def _read_json(path: str | Path):
+    """JSON files are UTF-8 on every platform (they travel between Windows, Linux and Android).
+    Files written by older Windows builds used the ANSI code page: read those as a fallback."""
+    raw = Path(path).read_bytes()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252", errors="replace")
+    return json.loads(text)
+
+
+def _write_json(path: Path, doc, ascii_only: bool = False) -> None:
+    path.write_text(json.dumps(doc, indent=2, ensure_ascii=ascii_only) + "\n", encoding="utf-8")
+
+
 def load_bank(path: str | Path) -> Bank:
     return Bank.from_bytes(Path(path).read_bytes())
 
@@ -56,7 +71,7 @@ def save_preset(preset: Preset, path: str | Path, source_slot: int | None = None
         "saved": datetime.now().isoformat(timespec="seconds"),
     }
     path = Path(path)
-    path.write_text(json.dumps(doc, indent=2) + "\n")
+    _write_json(path, doc, ascii_only=True)
     return path
 
 
@@ -67,8 +82,8 @@ def load_preset(path: str | Path) -> Preset:
 def load_preset_file(path: str | Path) -> tuple[Preset, str | None]:
     """The preset and its interface name (None if the file has none)."""
     try:
-        doc = json.loads(Path(path).read_text())
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        doc = _read_json(path)
+    except json.JSONDecodeError as e:
         raise ValueError(f"{path}: no es un archivo .tgpreset válido") from e
     if doc.get("format") != PRESET_FORMAT:
         raise ValueError(f"{path}: formato desconocido {doc.get('format')!r}")
@@ -108,7 +123,7 @@ class Aliases:
         self.presets: dict[str, str] = {}
         self.banks: dict[str, str] = {}
         try:
-            doc = json.loads(path.read_text())
+            doc = _read_json(path)
             self.presets = {k: v for k, v in doc.get("presets", {}).items() if v}
             self.banks = {k: v for k, v in doc.get("banks", {}).items() if v}
         except (OSError, ValueError):
@@ -117,8 +132,7 @@ class Aliases:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(json.dumps({"presets": self.presets, "banks": self.banks},
-                                  indent=2, ensure_ascii=False) + "\n")
+        _write_json(tmp, {"presets": self.presets, "banks": self.banks})
         tmp.replace(self.path)
 
     def preset(self, slot: int) -> str:
@@ -172,14 +186,14 @@ def save_set(bank: Bank, slots: list[int], path: str | Path, aliases: "Aliases |
         ],
     }
     path = Path(path)
-    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    _write_json(path, doc)
     return path
 
 
 def load_set(path: str | Path) -> tuple[str | None, list[tuple[Preset, str | None]]]:
     try:
-        doc = json.loads(Path(path).read_text())
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        doc = _read_json(path)
+    except json.JSONDecodeError as e:
         raise ValueError(f"{path}: no es un archivo .tgset válido") from e
     if doc.get("format") != SET_FORMAT:
         raise ValueError(f"{path}: formato desconocido {doc.get('format')!r}")
@@ -196,7 +210,7 @@ class Settings:
         self.path = path or SETTINGS_FILE
         self.data: dict = {}
         try:
-            self.data = json.loads(self.path.read_text())
+            self.data = _read_json(self.path)
         except (OSError, ValueError):
             pass
 
@@ -208,7 +222,7 @@ class Settings:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data, indent=2, ensure_ascii=False) + "\n")
+        _write_json(self.path, self.data)
 
     @property
     def ai(self) -> dict:

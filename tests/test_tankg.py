@@ -434,3 +434,17 @@ def test_version_matches_web_and_android():
     from tankg.version import __version__
     assert f'export const VERSION = "{__version__}"' in (ROOT / "web/js/data.js").read_text(encoding="utf-8")
     assert "tankg/version.py" in (ROOT / "android/build.sh").read_text()
+
+
+def test_json_files_are_utf8_and_read_old_ansi(tmp_path):
+    bank = Bank.from_bytes(LIVE)
+    path = tmp_path / "p.tgpreset"
+    library.save_preset(bank.presets[0], path, 0, "Canción ñandú")
+    assert library.load_preset_file(path)[1] == "Canción ñandú"
+    aliases = library.Aliases(tmp_path / "a.json")
+    aliases.set_preset(0, "Pingüino")
+    library.save_set(bank, [0, 1], tmp_path / "s.tgset", aliases, "Año")
+    assert (tmp_path / "s.tgset").read_bytes().decode("utf-8").count("Pingüino") == 1   # UTF-8 on every OS
+    old = tmp_path / "old.tgset"   # written by a pre-1.5 Windows build (ANSI code page)
+    old.write_bytes((tmp_path / "s.tgset").read_text(encoding="utf-8").encode("cp1252"))
+    assert library.load_set(old)[0] == "Año"
