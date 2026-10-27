@@ -60,7 +60,7 @@ import java.util.Iterator;
  *
  * Bridge (window.AndroidMidi): list() -> JSON [{id, name}], open(id) -> __midiOpened(id, ok, err),
  * send(hex), close(), saveFile(name, base64, mime), httpPost(id, url, headers, body) ->
- * __httpDone(id, status, text), openUrl(url), openChat(package, url), copyText(text), version(),
+ * __httpDone(id, status, text), openUrl(url), openChat(package, url, text), copyText(text), version(),
  * installUpdate(apkUrl, sumsUrl) -> __updateState(state, detail) (refuses an APK not in SHA256SUMS). Incoming complete SysEx frames ->
  * __midiIn(hex); device plug/unplug -> __midiState(state, name). <input type=file> opens the
  * system file picker.
@@ -312,17 +312,28 @@ public class MainActivity extends Activity {
             });
         }
 
-        /** Opens the chat in the AI service's app when installed (a new chat if it takes the link),
-         *  otherwise in the browser. Returns "app" or "web". */
+        /** Hands the prompt to the AI service's app when installed: shared as text (it lands in the
+         *  message box, the standard Android share target), else the app is opened (the prompt is on the
+         *  clipboard anyway), else the web page. Returns "shared", "app" or "web". */
         @JavascriptInterface
-        public String openChat(String pkg, String url) {
+        public String openChat(String pkg, String url, String text) {
             PackageManager pm = getPackageManager();
             Intent intent = null;
+            String where = "web";
             if (!pkg.isEmpty()) {
+                Intent share = new Intent(Intent.ACTION_SEND).setType("text/plain").setPackage(pkg)
+                        .putExtra(Intent.EXTRA_TEXT, text);
                 Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(pkg);
-                intent = view.resolveActivity(pm) != null ? view : pm.getLaunchIntentForPackage(pkg);
+                if (!text.isEmpty() && share.resolveActivity(pm) != null) {
+                    intent = share;
+                    where = "shared";
+                } else if (view.resolveActivity(pm) != null) {
+                    intent = view;
+                    where = "app";
+                } else if ((intent = pm.getLaunchIntentForPackage(pkg)) != null) {
+                    where = "app";
+                }
             }
-            String where = intent != null ? "app" : "web";
             Intent chosen = intent != null ? intent : new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             ui.post(() -> {
                 try {
@@ -332,6 +343,12 @@ public class MainActivity extends Activity {
                 }
             });
             return where;
+        }
+
+        /** Older pages: open the app or the web page without sharing text. */
+        @JavascriptInterface
+        public String openChat(String pkg, String url) {
+            return openChat(pkg, url, "");
         }
 
         @JavascriptInterface

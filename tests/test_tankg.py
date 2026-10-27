@@ -454,10 +454,20 @@ def test_open_chat_prefers_registered_app(monkeypatch):
     from tankg import chatapps
     opened = []
     monkeypatch.setattr(chatapps, "scheme_handler", lambda scheme: scheme == "claude")
+    monkeypatch.setattr(chatapps.sys, "platform", "linux")
     monkeypatch.setattr(chatapps.subprocess, "Popen", lambda args, **kw: opened.append(args))
-    monkeypatch.setattr(chatapps.os, "startfile", lambda link: opened.append(link), raising=False)
     web = []
-    assert chatapps.open_chat("Claude", web.append) == "app" and not web
-    assert "claude://claude.ai/new" in str(opened[-1])
-    assert chatapps.open_chat("ChatGPT", web.append) == "web" and web == ["https://chatgpt.com/"]
+    assert chatapps.open_chat("Claude", web.append, "hola ñ") == "shared" and not web
+    assert opened[-1][1] == "claude://claude.ai/new?q=hola%20%C3%B1"
+    assert chatapps.open_chat("Claude", web.append, "x" * 20000) == "app" and opened[-1][1] == "claude://claude.ai/new"
+    assert chatapps.open_chat("ChatGPT", web.append, "hola") == "web" and web == ["https://chatgpt.com/"]
     assert chatapps.open_chat("Gemini", web.append) == "web"
+
+
+def test_prompts_fit_in_claude_desktop_prefill():
+    """Claude Desktop cuts ?q= at 14336 characters: if the prompt grows past it, the user only gets the
+    app opened (still works through the clipboard) — shorten the prompt or accept that."""
+    from tankg import ai
+    limit = ai.CHAT_APPS["Claude"]["limit"]
+    for bank in (False, True):
+        assert len(ai.web_prompt("x" * 120, ai.INSTRUMENTS[0], bank)) <= limit

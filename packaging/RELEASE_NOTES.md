@@ -13,9 +13,11 @@ No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
 ## Novedades
 
-- **«Copiar y abrir chat» abre la app de la IA si la tienes instalada:** en Android, las apps de
-  Claude, ChatGPT o Gemini; en el PC, Claude Desktop (o la app de ChatGPT si registra su enlace).
-  Si no están, se abre la página web como antes. Las instrucciones quedan copiadas igual.
+- **«Copiar y abrir chat» usa la app de la IA si la tienes instalada y le pasa las instrucciones:**
+  en Android se comparten a la app de Claude, ChatGPT o Gemini (aparecen en el cuadro de mensaje);
+  en el PC, Claude Desktop abre un chat nuevo con las instrucciones ya escritas (la app de ChatGPT
+  se abre si registra su enlace). Si no hay app, se abre la página web como antes. Las instrucciones
+  quedan copiadas igual, por si hay que pegarlas.
 
 Si tienes la 1.5.0, esta versión te llega sola: la app avisa al abrirla.
 

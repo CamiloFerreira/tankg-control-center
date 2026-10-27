@@ -986,10 +986,11 @@ function aiCopy() {
   if (ANDROID) globalThis.AndroidMidi.copyText(prompt); else navigator.clipboard?.writeText(prompt).catch(() => {});
   const site = $("aiSite").value, url = AI.webSites[site];
   let where = "web";
-  if (ANDROID && globalThis.AndroidMidi.openChat) where = globalThis.AndroidMidi.openChat(AI.chatApps[site]?.android || "", url);
+  if (ANDROID && globalThis.AndroidMidi.openChat) where = globalThis.AndroidMidi.openChat(AI.chatApps[site]?.android || "", url, prompt);
   else if (ANDROID) globalThis.AndroidMidi.openUrl(url);
   else window.open(url, "_blank", "noopener");
-  toast(`Instrucciones copiadas: pégalas en ${where === "app" ? `la app de ${site}` : "el chat"} y envía`);
+  toast(where === "shared" ? `Instrucciones enviadas a la app de ${site}: revisa el mensaje y envíalo (también quedaron copiadas)`
+    : `Instrucciones copiadas: pégalas en ${where === "app" ? `la app de ${site}` : "el chat"} y envía`, 5000);
 }
 
 function aiRead() {

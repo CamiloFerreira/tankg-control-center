@@ -23,12 +23,14 @@ WEB_SITES = {
     "Gemini": "https://gemini.google.com/app",
 }
 # Native chat apps opened instead of the browser when installed. Android: package names (they must
-# also be listed in <queries> of android/AndroidManifest.xml). Desktop: link opened when the system
-# has a handler for its scheme ("claude://claude.ai/new" is the "New chat" action of Claude Desktop).
+# also be listed in <queries> of android/AndroidManifest.xml; the prompt is shared to them as text).
+# Desktop: link opened when the system has a handler for its scheme. "claude://claude.ai/new" is the
+# "New chat" action of Claude Desktop, whose handler puts ?q= into the message box (verified in its
+# app bundle, cut at 14336 characters: longer prompts only open the app and stay on the clipboard).
 CHAT_APPS = {
-    "Claude": {"android": "com.anthropic.claude", "desktop": "claude://claude.ai/new"},
-    "ChatGPT": {"android": "com.openai.chatgpt", "desktop": "chatgpt://"},
-    "Gemini": {"android": "com.google.android.apps.bard", "desktop": ""},
+    "Claude": {"android": "com.anthropic.claude", "desktop": "claude://claude.ai/new", "prefill": "q", "limit": 14336},
+    "ChatGPT": {"android": "com.openai.chatgpt", "desktop": "chatgpt://", "prefill": "", "limit": 0},
+    "Gemini": {"android": "com.google.android.apps.bard", "desktop": "", "prefill": "", "limit": 0},
 }
 
 PROVIDERS = {

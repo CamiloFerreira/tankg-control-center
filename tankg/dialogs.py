@@ -1120,14 +1120,18 @@ class AIDialog(StyledDialog):
         if text is None:
             return
         self._save_settings()
-        QApplication.clipboard().setText(ai.web_prompt(text, self.instrument.currentText(), self._bank()))
+        prompt = ai.web_prompt(text, self.instrument.currentText(), self._bank())
+        QApplication.clipboard().setText(prompt)
         self.waiting_clipboard = True
         self.apply_btn.setEnabled(False)
-        where = chatapps.open_chat(self._site(), lambda url: QDesktopServices.openUrl(QUrl(url)))
+        where = chatapps.open_chat(self._site(), lambda url: QDesktopServices.openUrl(QUrl(url)), prompt)
         self._set_step(1)
-        self._show_empty(f"Esperando la respuesta de {self._site()}"
-                         f"{' (app de escritorio)' if where == 'app' else ''}…\nPega con Ctrl+V en el chat, "
-                         "envía y copia la respuesta.")
+        if where == "shared":
+            how = f"Las instrucciones ya están escritas en la app de {self._site()}: revisa y envía, luego copia la respuesta."
+        else:
+            how = (f"Pega con Ctrl+V en {'la app de ' + self._site() if where == 'app' else 'el chat'}, "
+                   "envía y copia la respuesta.")
+        self._show_empty(f"Esperando la respuesta de {self._site()}…\n{how}")
 
     def _clipboard_changed(self) -> None:
         if not self.waiting_clipboard or self.main.local is None:
