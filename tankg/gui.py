@@ -16,11 +16,11 @@ from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, S
 from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QMenu, QToolButton, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
-    QSlider, QSpinBox, QStyle, QToolBar, QVBoxLayout, QWidget,
+    QInputDialog, QLabel, QLineEdit, QMenu, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import dialogs, library, templates, theme
+from . import dialogs, library, theme
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_of
 
@@ -82,11 +82,12 @@ QLabel#conn { border-radius: 8px; padding: 2px 10px; font-weight: bold; }
 class _Signals(QObject):
     done = Signal(object)
     failed = Signal(str)
-    progress = Signal(str)
+    progress = Signal(str, int, int)   # text, step, total (-1, -1 when there is no count)
 
 
 class Job(QRunnable):
-    """Runs fn(dev, report) with a freshly opened TankG in a worker thread."""
+    """Runs fn(dev, report) with a freshly opened TankG in a worker thread.
+    report(text, n=-1, total=-1) shows progress."""
 
     def __init__(self, fn):
         super().__init__()
@@ -97,7 +98,7 @@ class Job(QRunnable):
         try:
             dev = TankG.open()
             try:
-                result = self.fn(dev, self.signals.progress.emit)
+                result = self.fn(dev, lambda text, n=-1, total=-1: self.signals.progress.emit(text, n, total))
             finally:
                 dev.close()
             self.signals.done.emit(result)
@@ -244,7 +245,7 @@ class Section(QFrame):
         if switch_key:
             self.switch = QPushButton("ON")
             self.switch.setCheckable(True)
-            self.switch.setFixedWidth(46)
+            self.switch.setFixedSize(52, 24)
             self.switch.setToolTip(f"Módulo encendido/apagado (byte {FIELD_BY_KEY[switch_key].offset}, "
                                    "deducido; pendiente de calibrar)")
             self.switch.toggled.connect(self._toggled)
@@ -267,8 +268,9 @@ class Section(QFrame):
         c = SECTION_COLORS[self.section]
         self.switch.setText("ON" if on else "OFF")
         self.switch.setStyleSheet(
-            f"background: {c}; color: #111; border-radius: 6px; font-weight: bold;" if on else
-            "background: #0e2b2a; color: #6c8f8e; border-radius: 6px; font-weight: bold;")
+            f"background: {c}; color: #111; border-radius: 6px; font-weight: bold; padding: 0; font-size: 11px;"
+            if on else
+            "background: #0e2b2a; color: #6c8f8e; border-radius: 6px; font-weight: bold; padding: 0; font-size: 11px;")
 
     def set_on(self, on: bool) -> None:
         if self.switch:
@@ -297,12 +299,18 @@ def two_lines(text: str, width: int = 9) -> str:
 
 
 class SlotButton(QPushButton):
+    doubleClicked = Signal(int)
+
     def __init__(self, slot: int):
         super().__init__()
         self.slot = slot
         self.setObjectName("slot")
         self.setMinimumSize(QSize(52, 40))
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt API
+        self.doubleClicked.emit(self.slot)
 
     def show_preset(self, p: Preset | None, selected: bool, modified: bool, alias: str = "") -> None:
         amp = p.amp_name if p else "—"
@@ -314,7 +322,8 @@ class SlotButton(QPushButton):
         tip = f"Preset {slot_name(self.slot)}" + (f" — {alias}" if alias else "")
         if p:
             tip += f"\n{p.amp_name} / {p.cab_name}"
-        self.setToolTip(tip + ("\nModificado, sin guardar en la pedalera" if modified else ""))
+        self.setToolTip(tip + ("\nModificado, sin guardar en la pedalera" if modified else "")
+                        + "\nDoble clic: activar en la pedalera · clic derecho: más opciones")
 
 
 STYLE_SLIDER = """
@@ -341,7 +350,7 @@ class MainWindow(QMainWindow):
         self.local: Bank | None = None
         self.current = 0
         self.clipboard: Preset | None = None
-        self.undo_stack: list[Bank] = []
+        self.undo_stack: list[tuple[Bank, dict, dict]] = []   # bank + preset/bank names
         self.busy = False
         self._jobs: set[Job] = set()
         self.connected = False
@@ -366,6 +375,7 @@ class MainWindow(QMainWindow):
         self.conn = QLabel()
         self.conn.setObjectName("conn")
         self.statusBar().addPermanentWidget(self.conn)
+        self._build_actions()
         self._build_toolbar()
         self._build_menus()
         self.refresh()
@@ -407,12 +417,14 @@ class MainWindow(QMainWindow):
             for letter in range(4):
                 b = SlotButton(bank * 4 + letter)
                 b.clicked.connect(lambda _=False, s=b.slot: self.select_slot(s))
+                b.doubleClicked.connect(lambda s: (self.select_slot(s), self.activate_selected()))
+                b.customContextMenuRequested.connect(lambda pos, s=b.slot: self._slot_menu(s, pos))
                 grid.addWidget(b, bank * 2 + 2, letter)
                 self.slot_buttons.append(b)
             grid.setRowMinimumHeight(bank * 2 + 1, 18)
         lay.addLayout(grid)
         lay.addStretch()
-        hint = QLabel("• sin guardar · borde = color LED")
+        hint = QLabel("• = sin guardar · doble clic: activar\nclic derecho: copiar, duplicar, fábrica…")
         hint.setStyleSheet("color: #6b7480; font-size: 11px;")
         lay.addWidget(hint)
         return frame
@@ -436,11 +448,7 @@ class MainWindow(QMainWindow):
         self.bank_tag.setObjectName("bankTag")
         self.badge = QLabel("modificado")
         self.badge.setObjectName("badge")
-        self.ai_btn = QPushButton("✨ Crear con IA")
-        self.ai_btn.setObjectName("primary")
-        self.ai_btn.setToolTip("Describe un sonido y la IA (Claude, ChatGPT o un modelo local) crea el preset")
-        self.ai_btn.clicked.connect(self.open_ai)
-        self.color_btn = QPushButton("Color LED")
+        self.color_btn = QPushButton("LED")
         self.color_btn.setObjectName("action")
         self.color_btn.setToolTip("Color del interruptor de este preset (bytes 18-20, deducido)")
         self.color_btn.clicked.connect(self.pick_color)
@@ -455,7 +463,6 @@ class MainWindow(QMainWindow):
         head.addWidget(self.bank_tag)
         head.addWidget(self.badge)
         head.addStretch()
-        head.addWidget(self.ai_btn)
         head.addWidget(self.color_btn)
         head.addWidget(self.revert_btn)
         head.addWidget(self.send_btn)
@@ -545,54 +552,110 @@ class MainWindow(QMainWindow):
         pl.addLayout(feet)
         lay.addWidget(pedal, 1)
 
-        note = QLabel("TYPE e IR CAB verificados con la lista oficial. El resto de controles siguen el "
-                      "manual; su posición en la memoria está deducida y pendiente de calibrar (ver tooltip). "
-                      "MASTER es global y no se guarda en el preset.")
+        note = QLabel("TYPE e IR CAB verificados · el resto de controles se deduce del manual "
+                      "(Pedalera → Asistente de calibración) · MASTER es global y no se guarda en el preset")
         note.setWordWrap(True)
         note.setStyleSheet("color: #7d8793; font-size: 11px;")
         lay.addWidget(note)
         return w
 
-    def _build_toolbar(self) -> None:
-        tb = QToolBar("Principal")
-        tb.setMovable(False)
-        tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.addToolBar(tb)
-        icon = self.style().standardIcon
-
-        def add(text, fn, ic, tip=""):
-            a = QAction(icon(ic), text, self)
+    def _build_actions(self) -> None:
+        """Every command is one QAction, shared by toolbar, menus and the slot context menu."""
+        def act(key, text, fn, shortcut=None, tip=""):
+            a = QAction(text, self)
             a.triggered.connect(fn)
-            a.setToolTip(tip or text)
-            tb.addAction(a)
+            if shortcut:
+                a.setShortcut(QKeySequence(shortcut))
+            if tip:
+                a.setToolTip(tip)
+            self.act[key] = a
             return a
 
-        add("Leer pedalera", self.read_device, QStyle.SP_BrowserReload, "Leer los 36 presets (F5)")
-        self.send_all_action = add("Guardar todo", self.send_all, QStyle.SP_DialogSaveButton,
-                                   "Enviar a la pedalera todos los presets modificados (Ctrl+Enter)")
-        tb.addSeparator()
-        add("Deshacer", self.undo, QStyle.SP_ArrowBack, "Ctrl+Z")
-        add("Copiar", self.copy_preset, QStyle.SP_FileDialogDetailedView, "Ctrl+C")
-        add("Pegar", self.paste_preset, QStyle.SP_FileDialogContentsView, "Ctrl+V")
-        add("Intercambiar", self.swap_preset, QStyle.SP_BrowserStop, "Intercambiar con otro slot")
-        add("Fábrica", self.factory_selected, QStyle.SP_DialogResetButton, "Restaurar el preset de fábrica")
-        tpl = QToolButton()
-        tpl.setText("Plantilla")
-        tpl.setIcon(icon(QStyle.SP_FileIcon))
-        tpl.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        tpl.setPopupMode(QToolButton.InstantPopup)
-        tpl.setToolTip("Reemplazar este preset por una plantilla")
-        tpl.setMenu(self._template_menu())
-        tb.addWidget(tpl)
-        tb.addSeparator()
-        add("Backup", self.backup_device, QStyle.SP_DriveHDIcon, "Backup del banco de la pedalera (Ctrl+B)")
-        tb.addSeparator()
-        self.live_action = QAction(icon(QStyle.SP_MediaVolume), "Escucha en vivo", self)
-        self.live_action.setCheckable(True)
-        self.live_action.setToolTip("Cada cambio se guarda en la pedalera y se activa el preset para oírlo "
-                                    "al momento (escribe en la memoria de la pedalera)")
-        self.live_action.toggled.connect(self._live_toggled)
+        self.act: dict[str, QAction] = {}
+        act("read", "Leer pedalera", self.read_device, "F5", "Leer los 36 presets de la pedalera (F5)")
+        act("send_all", "Guardar cambios", self.send_all, "Ctrl+Return",
+            "Subir a la pedalera todos los presets modificados (Ctrl+Enter)")
+        act("send_one", "Guardar este preset", self.send_selected, "Ctrl+Shift+Return")
+        act("activate", "Activar en la pedalera", self.activate_selected, "Ctrl+Space")
+        act("undo", "Deshacer", self.undo, "Ctrl+Z", "Deshacer el último cambio (Ctrl+Z)")
+        act("library", "Biblioteca de sonidos", self.open_artists, "Ctrl+L",
+            "Biblioteca: más de 500 presets de bandas y estilos, listos para usar (Ctrl+L)")
+        act("ai", "Crear con IA", self.open_ai, "Ctrl+K", "Describe un sonido y la IA crea el preset (Ctrl+K)")
+        act("copy", "Copiar", self.copy_preset, "Ctrl+C")
+        act("paste", "Pegar", self.paste_preset, "Ctrl+V")
+        act("duplicate", "Duplicar en otro slot…", self.duplicate_preset, "Ctrl+D")
+        act("swap", "Intercambiar con otro slot…", self.swap_preset)
+        act("left", "Mover a la izquierda", lambda: self.move_preset(-1), "Alt+Left")
+        act("right", "Mover a la derecha", lambda: self.move_preset(1), "Alt+Right")
+        act("rename", "Renombrar preset", lambda: (self.alias_edit.setFocus(), self.alias_edit.selectAll()), "F2")
+        act("rename_bank", "Renombrar banco…", lambda: self.rename_bank(self.current // 4), "Shift+F2")
+        act("color", "Color del LED…", self.pick_color)
+        act("revert", "Revertir este preset", self.revert_selected)
+        act("revert_all", "Revertir todo", self.revert_all)
+        act("factory", "Este preset", self.factory_selected)
+        act("factory_bank", "Banco actual", self.factory_current_bank)
+        act("factory_all", "Los 36 presets", self.factory_all)
+        act("backup", "Hacer backup ahora", self.backup_device, "Ctrl+B")
+        live = act("live", "Escucha en vivo", lambda: None, tip="Cada cambio se guarda en la pedalera y se activa "
+                   "el preset para oírlo al momento (escribe en la memoria de la pedalera)")
+        live.setCheckable(True)
+        live.toggled.connect(self._live_toggled)
+        self.live_action = live
+        self.send_all_action = self.act["send_all"]
+
+    def _build_toolbar(self) -> None:
+        tb = QToolBar("Principal")
+        tb.setObjectName("main")
+        tb.setMovable(False)
+        tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.addToolBar(tb)
+        for key in ("read", "send_all", "undo", None, "library", "ai"):
+            if key is None:
+                tb.addSeparator()
+            else:
+                tb.addAction(self.act[key])
+        for key, name in (("send_all", "toolPrimary"), ("ai", "toolAccent")):
+            tb.widgetForAction(self.act[key]).setObjectName(name)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tb.addWidget(spacer)
         tb.addAction(self.live_action)
+
+    def _build_menus(self) -> None:
+        a = self.act
+        mb = self.menuBar()
+        m = mb.addMenu("&Archivo")
+        self._action(m, "Abrir banco…", self.open_bank, "Ctrl+O")
+        self._action(m, "Guardar banco como…", self.save_bank, "Ctrl+S")
+        m.addSeparator()
+        self._action(m, "Importar preset…", self.import_preset, "Ctrl+I")
+        self._action(m, "Exportar preset…", self.export_preset, "Ctrl+E")
+        self._action(m, "Importar banco de 4 (.tgset)…", self.import_bank_set)
+        self._action(m, "Exportar banco de 4 (.tgset)…", self.export_bank_set)
+        m.addSeparator()
+        self._action(m, "Comparar con archivo de banco…", self.compare_file)
+        m.addSeparator()
+        self._action(m, "Salir", self.close, "Ctrl+Q")
+        m = mb.addMenu("&Pedalera")
+        for key in ("read", "send_all", "send_one", "activate", None, "live", None, "backup"):
+            m.addSeparator() if key is None else m.addAction(a[key])
+        self._action(m, "Gestor de backups…", lambda: dialogs.BackupManager(self).exec())
+        self._action(m, "Restaurar banco desde archivo…", self.restore_to_device)
+        m.addSeparator()
+        self._action(m, "Puerto MIDI…", self.choose_midi_port)
+        self._action(m, "Asistente de calibración…", lambda: dialogs.CalibrationWizard(self).exec())
+        m = mb.addMenu("&Editar")
+        for key in ("undo", None, "copy", "paste", "duplicate", "swap", "left", "right", None,
+                    "rename", "rename_bank", "color", None, "library", "ai", None):
+            m.addSeparator() if key is None else m.addAction(a[key])
+        sub = m.addMenu("Restaurar de fábrica")
+        for key in ("factory", "factory_bank", "factory_all"):
+            sub.addAction(a[key])
+        m.addAction(a["revert"])
+        m.addAction(a["revert_all"])
+        m = mb.addMenu("A&yuda")
+        self._action(m, "Bytes del preset", self.show_bytes)
+        self._action(m, "Acerca de", self.about)
 
     def _action(self, menu, text, fn, shortcut=None):
         a = QAction(text, self)
@@ -602,54 +665,22 @@ class MainWindow(QMainWindow):
         menu.addAction(a)
         return a
 
-    def _build_menus(self) -> None:
-        mb = self.menuBar()
-        m = mb.addMenu("&Archivo")
-        self._action(m, "Abrir banco...", self.open_bank, "Ctrl+O")
-        self._action(m, "Guardar banco como...", self.save_bank, "Ctrl+S")
-        m.addSeparator()
-        self._action(m, "Importar preset...", self.import_preset, "Ctrl+I")
-        self._action(m, "Exportar preset...", self.export_preset, "Ctrl+E")
-        m.addSeparator()
-        self._action(m, "Exportar banco actual (4 presets con nombres)...", self.export_bank_set)
-        self._action(m, "Importar banco (.tgset) en el banco actual...", self.import_bank_set)
-        m.addSeparator()
-        self._action(m, "Comparar con archivo de banco...", self.compare_file)
-        self._action(m, "Salir", self.close, "Ctrl+Q")
-        m = mb.addMenu("&Pedalera")
-        self._action(m, "Leer presets", self.read_device, "F5")
-        self._action(m, "Guardar todos los cambios", self.send_all, "Ctrl+Return")
-        self._action(m, "Guardar este preset", self.send_selected, "Ctrl+Shift+Return")
-        self._action(m, "Activar este preset", self.activate_selected, "Ctrl+Space")
-        m.addSeparator()
-        self._action(m, "Backup de la pedalera", self.backup_device, "Ctrl+B")
-        self._action(m, "Restaurar banco desde archivo...", self.restore_to_device)
-        self._action(m, "Gestor de backups...", lambda: dialogs.BackupManager(self).exec())
-        self._action(m, "Puerto MIDI...", self.choose_midi_port)
-        m.addSeparator()
-        self._action(m, "Asistente de calibración...", lambda: dialogs.CalibrationWizard(self).exec())
-        m = mb.addMenu("&Editar")
-        self._action(m, "Deshacer", self.undo, "Ctrl+Z")
-        m.addSeparator()
-        self._action(m, "Copiar preset", self.copy_preset, "Ctrl+C")
-        self._action(m, "Pegar preset", self.paste_preset, "Ctrl+V")
-        self._action(m, "Duplicar en otro slot...", self.duplicate_preset, "Ctrl+D")
-        self._action(m, "Intercambiar con otro slot...", self.swap_preset)
-        self._action(m, "Renombrar preset", lambda: self.alias_edit.setFocus(), "F2")
-        self._action(m, "Renombrar banco...", lambda: self.rename_bank(self.current // 4), "Shift+F2")
-        self._action(m, "Mover a la izquierda", lambda: self.move_preset(-1), "Alt+Left")
-        self._action(m, "Mover a la derecha", lambda: self.move_preset(1), "Alt+Right")
-        m.addSeparator()
-        self._action(m, "Crear preset con IA...", self.open_ai, "Ctrl+K")
-        m.addMenu(self._template_menu())
-        self._action(m, "Restaurar preset de fábrica", self.factory_selected)
-        self._action(m, "Restaurar banco actual de fábrica", self.factory_current_bank)
-        self._action(m, "Restaurar los 36 presets de fábrica", self.factory_all)
-        self._action(m, "Revertir este preset", self.revert_selected)
-        self._action(m, "Revertir todo", self.revert_all)
-        m = mb.addMenu("A&yuda")
-        self._action(m, "Bytes del preset", self.show_bytes)
-        self._action(m, "Acerca de", self.about)
+    def _slot_menu(self, slot: int, pos) -> None:
+        """Right click on a preset: everything that acts on one preset, in one place."""
+        self.select_slot(slot)
+        a = self.act
+        modified = slot in self.modified_slots()
+        a["send_one"].setEnabled(modified)
+        a["revert"].setEnabled(modified)
+        a["paste"].setEnabled(self.clipboard is not None)
+        menu = QMenu(self)
+        for key in ("activate", "send_one", "revert", None, "library", "ai", None, "copy", "paste",
+                    "duplicate", "swap", None, "rename", "color"):
+            menu.addSeparator() if key is None else menu.addAction(a[key])
+        menu.addMenu("Restaurar de fábrica").addAction(a["factory"])
+        menu.exec(self.slot_buttons[slot].mapToGlobal(pos))
+        for key in ("send_one", "revert", "paste"):
+            a[key].setEnabled(True)
 
     # state ---------------------------------------------------------------------------
 
@@ -660,7 +691,7 @@ class MainWindow(QMainWindow):
 
     def _push_undo(self) -> None:
         if self.local is not None:
-            self.undo_stack.append(self.local.copy())
+            self.undo_stack.append((self.local.copy(), dict(self.aliases.presets), dict(self.aliases.banks)))
             del self.undo_stack[:-200]
 
     def _set_local(self, slot: int, preset: Preset) -> None:
@@ -688,8 +719,9 @@ class MainWindow(QMainWindow):
         self.badge.setVisible(self.current in modified)
         self.revert_btn.setEnabled(self.current in modified)
         self.send_btn.setEnabled(self.current in modified)
-        self.send_all_action.setToolTip(f"Guardar en la pedalera {len(modified)} preset(s) modificados (Ctrl+Enter)")
+        self.send_all_action.setText(f"Guardar cambios ({len(modified)})" if modified else "Guardar cambios")
         self.send_all_action.setEnabled(bool(modified))
+        self.act["undo"].setEnabled(bool(self.undo_stack))
         p = self.local.presets[self.current] if self.local else None
         for key, ctrl in self.controls.items():
             ctrl.setEnabled(p is not None)
@@ -781,7 +813,9 @@ class MainWindow(QMainWindow):
 
     # background jobs -------------------------------------------------------------------
 
-    def _run(self, fn, on_done, label: str, quiet_errors: bool = False) -> bool:
+    def _run(self, fn, on_done, label: str, quiet_errors: bool = False, dialog=None) -> bool:
+        """Run fn(dev, report) in the background. With an UploadDialog, progress and errors
+        are shown there instead of the status bar / a message box."""
         if self.busy:
             return False
         self.busy = True
@@ -790,8 +824,10 @@ class MainWindow(QMainWindow):
         job.setAutoDelete(False)
         self._jobs.add(job)   # keep the runnable and its signals alive until it reports back
         job.signals.done.connect(lambda r: (self._jobs.discard(job), self._job_done(on_done, r)))
-        job.signals.failed.connect(lambda m: (self._jobs.discard(job), self._job_failed(m, quiet_errors)))
-        job.signals.progress.connect(self.statusBar().showMessage)
+        job.signals.failed.connect(lambda m: (self._jobs.discard(job), self._job_failed(m, quiet_errors, dialog)))
+        job.signals.progress.connect(lambda text, *_: self.statusBar().showMessage(text))
+        if dialog is not None:
+            job.signals.progress.connect(dialog.progress)
         self.pool.start(job)
         return True
 
@@ -801,10 +837,12 @@ class MainWindow(QMainWindow):
         on_done(result)
         self.refresh()
 
-    def _job_failed(self, msg: str, quiet: bool) -> None:
+    def _job_failed(self, msg: str, quiet: bool, dialog=None) -> None:
         self.busy = False
         self.statusBar().clearMessage()
-        if quiet:
+        if dialog is not None:
+            dialog.failed(msg)
+        elif quiet:
             self.statusBar().showMessage(f"Error: {msg}", 8000)
         else:
             QMessageBox.critical(self, "Error", msg)
@@ -847,11 +885,21 @@ class MainWindow(QMainWindow):
         target = self.local.copy()
         need_backup = not self.session_backup_done
 
+        names = {s: self.aliases.preset(s) for s in slots}
+
         def work(dev: TankG, report):
-            current = dev.read_bank()
-            path = str(library.backup(current, "auto")) if need_backup else None
-            after = dev.write_presets(
-                target, slots, lambda n, total, s: report(f"Guardando {slot_name(s)} ({n + 1}/{total})..."))
+            def progress(n: int, total: int, s: int | None) -> None:
+                if s is None:
+                    report("Verificando: releyendo la pedalera…", n, total)
+                else:
+                    name = f" «{names[s]}»" if names[s] else ""
+                    report(f"Subiendo {n + 1} de {total} · {slot_name(s)}{name}…", n, total)
+
+            path = None
+            if need_backup:
+                report("Backup previo del banco…")
+                path = str(library.backup(dev.bank or dev.read_bank(), "auto"))
+            after = dev.write_presets(target, slots, progress)
             if select is not None:
                 dev.select_preset(select)
             return after, path
@@ -872,22 +920,45 @@ class MainWindow(QMainWindow):
                 self, "Guardar en la pedalera",
                 f"Se sobrescribirán en la pedalera: {names}\n¿Continuar?"):
             return
+        if self.busy:
+            QMessageBox.information(self, "Ocupado", "Hay una operación en curso.")
+            return
+        dialog = dialogs.UploadDialog(self, slots, [self.aliases.preset(s) for s in slots])
 
         def done(result) -> None:
             path = self._apply_written(slots, result)
-            msg = f"Guardado y verificado: {names}"
-            self.statusBar().showMessage(msg + (f" · backup previo: {path}" if path else ""), 8000)
+            n = len(slots)
+            msg = f"{n} preset{'s' if n > 1 else ''} guardado{'s' if n > 1 else ''} y verificado{'s' if n > 1 else ''}"
+            dialog.finished(msg + (" · backup previo hecho" if path else ""))
+            self.statusBar().showMessage(f"Guardado y verificado: {names}"
+                                         + (f" · backup previo: {path}" if path else ""), 8000)
 
-        if not self._run(self._write_job(slots, select), done, "Guardando..."):
-            QMessageBox.information(self, "Ocupado", "Hay una operación en curso.")
+        self._run(self._write_job(slots, select), done, "Guardando...", dialog=dialog)
+        dialog.show()
+
+    def upload_now(self, slots: list[int], select: int | None = None) -> bool:
+        """Send freshly applied presets straight away when the pedal is ready. False when the
+        changes stay in the editor (pedal not connected or not read yet)."""
+        if not (self.connected and self.device is not None and not self.busy):
+            return False
+        slots = [s for s in slots if s in self.modified_slots()]
+        if not slots:
+            self.statusBar().showMessage("Sin cambios: la pedalera ya tiene esos presets.", 5000)
+            return True
+        self._send(slots, select=select, confirm=False)
+        return True
 
     def send_all(self) -> None:
         if self._need_local() and self.device is not None:
             self._send(self.modified_slots())
 
     def send_selected(self) -> None:
-        if self._need_local() and self.current in self.modified_slots():
+        if not self._need_local():
+            return
+        if self.current in self.modified_slots():
             self._send([self.current], select=self.current)
+        else:
+            self.statusBar().showMessage(f"{slot_name(self.current)} no tiene cambios: ya está en la pedalera.", 4000)
 
     def activate_selected(self, quiet: bool = False) -> None:
         s = self.current
@@ -909,13 +980,15 @@ class MainWindow(QMainWindow):
             return
         if on:
             self._schedule_live()
+        else:
+            self.live_timer.stop()   # a pending audition must not write once the user turned it off
 
     def _schedule_live(self) -> None:
         if self.live_action.isChecked() and self.connected and self.device is not None:
             self.live_timer.start(LIVE_DELAY_MS)
 
     def _live_send(self) -> None:
-        if self.local is None or self.device is None:
+        if self.local is None or self.device is None or not self.live_action.isChecked():
             return
         if self.busy:
             self.live_timer.start(LIVE_DELAY_MS)
@@ -949,7 +1022,10 @@ class MainWindow(QMainWindow):
 
     def undo(self) -> None:
         if self.undo_stack:
-            self.local = self.undo_stack.pop()
+            self.local, presets, banks = self.undo_stack.pop()
+            if (presets, banks) != (self.aliases.presets, self.aliases.banks):
+                self.aliases.presets, self.aliases.banks = presets, banks
+                self.aliases.save()
             self.refresh()
             self._schedule_live()
 
@@ -1026,38 +1102,43 @@ class MainWindow(QMainWindow):
                                 "La pedalera no cambia hasta que pulses «Guardar todo»."):
             self._restore_factory(list(range(SLOTS)))
 
-    def _template_menu(self) -> QMenu:
-        menu = QMenu("Nuevo desde plantilla", self)
-        for name in templates.TEMPLATES:
-            menu.addAction(name, lambda n=name: self.apply_template(n))
-        return menu
-
-    def apply_template(self, name: str) -> None:
-        if self._need_local():
-            self._set_local(self.current, templates.build(name, self.local.presets[self.current]))
-            self.statusBar().showMessage(f"Plantilla «{name}» aplicada a {slot_name(self.current)}", 4000)
-
     def open_ai(self) -> None:
         if self._need_local():
             dialogs.AIDialog(self).exec()
 
-    def apply_generated(self, preset: Preset, name: str) -> None:
-        self.aliases.set_preset(self.current, name)
-        self._set_local(self.current, preset)
-        self.statusBar().showMessage(f"Preset «{name}» creado con IA en {slot_name(self.current)}. "
-                                     "Escúchalo (o activa «Escucha en vivo») y pulsa «Guardar preset».", 8000)
-
-    def apply_generated_bank(self, bank: int, bank_name: str, items: list) -> None:
+    def apply_presets(self, first: int, items: list[tuple[Preset, str]], bank_name: str = "",
+                      upload: bool = True, what: str = "") -> None:
+        """Put presets into consecutive slots from `first` (with their names) and, when asked
+        and the pedal is ready, upload them right away with the progress window."""
         self._push_undo()
-        for i, (preset, name, _) in enumerate(items):
-            slot = bank * 4 + i
+        slots = []
+        for i, (preset, name) in enumerate(items):
+            slot = first + i
             self.local.presets[slot] = preset.copy()
             self.aliases.set_preset(slot, name)
-        if bank_name:
-            self.aliases.set_bank(bank, bank_name)
+            slots.append(slot)
+        if bank_name and len(items) == 4 and first % 4 == 0:
+            self.aliases.set_bank(first // 4, bank_name)
+        self.current = first
         self.refresh()
+        where = slot_name(first) if len(slots) == 1 else f"banco {first // 4 + 1}"
+        if upload and self.upload_now(slots, select=first):
+            return
         self._schedule_live()
-        self.statusBar().showMessage(f"Banco {bank + 1} creado con IA. Escúchalo y pulsa «Guardar todo».", 8000)
+        hint = "«Guardar preset»" if len(slots) == 1 else "«Guardar todo»"
+        offline = " (pedalera no conectada)" if upload and not self.connected else ""
+        self.statusBar().showMessage(f"{what or 'Presets'} en {where}{offline}. Pulsa {hint} para subirlos.", 8000)
+
+    def apply_generated(self, preset: Preset, name: str) -> None:
+        self.apply_presets(self.current, [(preset, name)], what=f"Preset «{name}» creado con IA")
+
+    def apply_generated_bank(self, bank: int, bank_name: str, items: list) -> None:
+        self.apply_presets(bank * 4, [(p, name) for p, name, _ in items], bank_name,
+                           what=f"Banco «{bank_name}» creado con IA" if bank_name else "Banco creado con IA")
+
+    def open_artists(self) -> None:
+        if self._need_local():
+            dialogs.ArtistLibrary(self).exec()
 
     def run_job(self, fn, on_done, label: str) -> bool:
         """For dialogs: run fn(dev, report) in the background."""

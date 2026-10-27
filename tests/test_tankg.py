@@ -4,7 +4,7 @@ import pytest
 
 from tankg import library, sysex
 from tankg.device import COMMIT_FRAME, DeviceError, TankG
-from tankg.model import BANK_LEN, Bank, Preset, parse_slot, slot_name
+from tankg.model import BANK_LEN, Bank, parse_slot, slot_name
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
@@ -126,7 +126,9 @@ def test_device_write_verify_and_select():
     bank = dev.read_bank()
     target = bank.copy()
     target.presets[1].amp = 0
-    after = dev.write_presets(target, [1])
+    steps = []
+    after = dev.write_presets(target, [1], lambda n, total, s: steps.append((n, total, s)))
+    assert steps == [(0, 1, 1), (1, 1, None)]   # last call = read-back verification
     assert after.presets[1].amp == 0
     assert bytes(pedal.mem[:2]) == b"\xa5\x5a" and len(pedal.mem) == BANK_LEN
     assert sum(1 for s in pedal.sent if s == COMMIT_FRAME) == 1
@@ -221,13 +223,29 @@ def test_set_roundtrip(tmp_path):
     assert [p for p, _ in items] == bank.presets[4:8]
 
 
-def test_templates_valid():
-    from tankg import templates
+def test_artist_banks_valid():
+    from tankg import ai, artists
+    from tankg.model import FIELD_BY_KEY, zone_of
     like = Bank.from_bytes(LIVE).presets[0]
-    for name in templates.TEMPLATES:
-        p = templates.build(name, like)
-        assert len(p.to_bytes()) == 21
-    assert templates.build("Bajo").cab_name == "HIFI_YAMAHA"
+    names = set()
+    for bank in artists.BANKS:
+        assert len(bank.presets) == 4 and bank.genre in artists.GENRES
+        roles = [p.role for p in bank.presets]
+        if roles[1] == "Rítmica":   # band banks: limpio/crunch, rítmica, variante, solo
+            assert roles[0] in ("Limpio", "Crunch") and roles[2:] == ["Variante", "Solo"], bank.name
+        for sp in bank.presets:
+            assert len(sp.name) <= 20 and sp.name not in names, sp.name
+            names.add(sp.name)
+            p = sp.build(like)
+            assert len(p.to_bytes()) == 21 and p.amp == sp.amp and p.cab == sp.cab
+            assert 0 <= sp.gain <= 127 and 0 <= sp.gate <= 55 and all(0 <= v <= 127 for v in sp.eq)
+            assert p.get("dly_on") == (sp.dly is not None)
+            if sp.mod:
+                assert zone_of(FIELD_BY_KEY["mod_fx"], p.get("mod_fx")).lower() == sp.mod[0]
+            if sp.rvb:
+                assert zone_of(FIELD_BY_KEY["rvb_decay"], p.get("rvb_decay")).lower() == sp.rvb[0]
+    assert len(artists.BANKS) >= 100
+    assert ai.system_prompt().count("\n- ") >= 10 and "Metallica Rítmica" in ai.system_prompt()
 
 
 def test_manual_port_selection(monkeypatch, tmp_path):

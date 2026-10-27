@@ -32,6 +32,14 @@ QToolBar {{ background: {SURFACE}; border: none; padding: 4px; spacing: 4px; }}
 QToolBar QToolButton {{ color: {TEXT}; padding: 6px 10px; border-radius: 6px; }}
 QToolBar QToolButton:hover {{ background: #2a3139; }}
 QToolBar QToolButton:checked {{ background: {TEAL}; }}
+QToolBar QToolButton:disabled {{ color: {TEXT_MUTED}; }}
+QToolBar#main {{ padding: 6px 10px; spacing: 6px; border-bottom: 1px solid {BORDER}; }}
+QToolBar#main QToolButton {{ padding: 7px 14px; font-weight: bold; }}
+QToolBar QToolButton#toolPrimary {{ background: {ACCENT}; color: white; }}
+QToolBar QToolButton#toolPrimary:hover {{ background: {ACCENT_HOVER}; }}
+QToolBar QToolButton#toolPrimary:disabled {{ background: {SURFACE_2}; color: {TEXT_MUTED}; }}
+QToolBar QToolButton#toolAccent {{ border: 1px solid {ACCENT}; color: #bff5dd; }}
+QToolBar QToolButton#toolAccent:hover {{ background: #16332b; }}
 QStatusBar {{ background: {SURFACE}; color: #aab; }}
 QMenuBar {{ background: {SURFACE}; color: {TEXT}; }}
 QMenuBar::item:selected {{ background: #2a3139; }}
@@ -100,6 +108,16 @@ QLabel#resText {{ color: #c8d0d8; }}
 QLabel#module {{ background: {SURFACE}; border-radius: 8px; padding: 6px 10px; color: {TEXT}; }}
 QLabel#status_ok {{ color: {OK}; }}
 QLabel#status_err {{ color: {ERROR}; }}
+
+/* lists */
+QListWidget {{ background: {FIELD}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 4px; }}
+QListWidget::item {{ padding: 5px 6px; border-radius: 4px; }}
+QListWidget::item:disabled {{ color: {TEXT_DIM}; font-weight: bold; }}
+QListWidget::item:selected {{ background: {TEAL}; color: white; }}
+
+/* progress bars */
+QProgressBar {{ background: {FIELD}; border: 1px solid {BORDER_2}; border-radius: 6px; max-height: 12px; }}
+QProgressBar::chunk {{ background: {ACCENT}; border-radius: 5px; }}
 
 /* scroll bars */
 QScrollArea {{ background: transparent; border: none; }}

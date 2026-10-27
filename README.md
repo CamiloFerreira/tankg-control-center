@@ -82,14 +82,23 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
   tiene su interruptor ON/OFF. Las perillas de 3 tramos muestran el tipo aproximado.
 - Abajo: interruptores D/AMP, C/MOD, B/DELAY, A/REVERB, BANK −/+ y el display. Pulsar un
   interruptor selecciona el preset y lo activa en la pedalera.
-- Arriba: «Color LED», «Revertir» y «Guardar preset». Barra: leer pedalera, guardar todo,
-  deshacer, copiar/pegar, intercambiar, restaurar de fábrica, importar/exportar, backup.
+- Barra: «Leer pedalera», «Guardar cambios (N)», «Deshacer», «Biblioteca de sonidos», «Crear con IA»
+  y «Escucha en vivo». Sobre el panel: «LED» (color), «Revertir» y «Guardar preset».
+- Lista de presets: doble clic activa el preset en la pedalera; clic derecho abre todo lo que se
+  puede hacer con un preset (guardar, copiar/pegar, duplicar, intercambiar, renombrar, fábrica…).
 - Nombres (solo en la app, la pedalera no guarda nombres): escribe el nombre del preset junto
   al título (F2); clic en «BANCO n» para nombrar el banco (Shift+F2). Se guardan en
   `~/.local/share/tankg/aliases.json` (Windows: `%APPDATA%\tankg\aliases.json`), siguen al preset al intercambiar/duplicar y viajan
   dentro de los `.tgpreset`.
-- Plantillas («Plantilla» en la barra o Editar → Nuevo desde plantilla): limpio, crunch,
-  overdrive, distorsión, alta ganancia, solo, ambiental, acústica, bajo, vacío.
+- **Biblioteca de sonidos** (barra o Ctrl+L), sin IA: más de 150 bancos y 600 presets. Cada banda
+  es un banco con el mismo orden: **A Limpio** (Crunch si la banda casi no toca limpio), **B Rítmica**,
+  **C Variante** (otra canción o época) y **D Solo**; el LED indica el tipo (cian, amarillo, rojo,
+  naranja, rosa). Incluye básicos, bancos por instrumento (bajo, clásica de nylon, acústica de acero,
+  Stratocaster, Les Paul), heavy clásico, thrash, death,
+  black, power/sinfónico, doom/stoner, nu metal, groove/metalcore, progresivo/djent, gótico, metal
+  en español (Rata Blanca, Hermética, Criminal, Pentagram, Six Magics, Barón Rojo…), hard rock,
+  alternativo, blues y más. Aplica uno al preset seleccionado o carga los 4 en un banco; con la
+  pedalera conectada se suben al momento. Son aproximaciones de oído: ajusta gain y volumen.
 - Fábrica: restaurar el preset, el banco actual o los 36 presets de fábrica (se cargan en el
   editor; «Guardar» los pasa a la pedalera).
 - Compartir: Archivo → Exportar/Importar banco (`.tgset`, 4 presets con sus nombres), además
@@ -99,14 +108,16 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
   LIVE tras mover una perilla y muestra qué byte cambió (anota en `calibration.log`).
 - **✨ Crear con IA** (cabecera del preset o Ctrl+K): describes el sonido con tus palabras
   («crunch tipo AC/DC», «limpio con chorus de los 80», «solo de Gilmour») y una IA rellena todos
-  los controles, nombra el preset y explica sus decisiones. Queda en el editor para escucharlo
-  antes de guardarlo. Puedes crear **solo el preset seleccionado** o el **banco completo** (4
+  los controles, nombra el preset y explica sus decisiones. Al aplicarlo se sube a la pedalera
+  (si está conectada; si no, queda en el editor). Puedes crear **solo el preset seleccionado** o el **banco completo** (4
   presets coherentes A–D con nombre de banco). Dos formas de conectar:
   - **Navegador (gratis, sin clave):** copia las instrucciones y abre Claude, ChatGPT o Gemini;
     pegas en el chat, copias la respuesta y la app la detecta sola en el portapapeles.
   - **Clave de API (automático):** Claude (Anthropic), ChatGPT (OpenAI) o un servidor compatible
     con OpenAI (Ollama/LM Studio, local). También lee `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`; la
     clave solo se guarda si marcas «Recordar» (sin cifrar, en `settings.json`).
+- Cada subida muestra una ventana de progreso («Subiendo 2 de 4 · 1B»), relee la pedalera
+  para verificar y se cierra sola al terminar; si algo falla, el error queda a la vista.
 - «Escucha en vivo»: cada cambio se guarda en la pedalera y se activa el preset para oírlo.
 - La conexión y desconexión se detectan solas. La pedalera solo se abre durante cada
   operación, así que no bloquea a PipeWire, a un DAW ni a M-EFCS.

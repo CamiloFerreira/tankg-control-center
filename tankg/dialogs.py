@@ -7,17 +7,17 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QUrl, Signal
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame,
-    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea,
+    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
     QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import ai, device, library
+from . import ai, artists, device, library
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, FIELDS, OFF_COLOR, REC_LEN, Bank, slot_name, zone_of
-from .theme import ERROR, OK, TEXT_DIM
+from .theme import ERROR, OK, TEXT, TEXT_DIM
 
 BYTE_NAMES = {f.offset: f.label for f in FIELDS}
 BYTE_NAMES.update({OFF_COLOR: "LED rojo", OFF_COLOR + 1: "LED verde", OFF_COLOR + 2: "LED azul"})
@@ -167,6 +167,227 @@ def ask(parent, title: str, text: str) -> bool:
     box.setDefaultButton(yes)
     box.exec()
     return box.clickedButton() is yes
+
+
+class UploadDialog(StyledDialog):
+    """Progress of a write to the pedal: one row per preset, a bar and the current step.
+    Closes by itself a moment after a verified write; stays open on errors."""
+
+    def __init__(self, main, slots: list[int], names: list[str]):
+        super().__init__(main, "Subiendo a la pedalera",
+                         "Se guarda cada preset, se confirma y se relee la pedalera para verificar.", 520, 200)
+        self.setModal(True)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.running = True   # Esc / window close are ignored until the job reports back
+        self.slots = slots
+        self.done_count = 0
+        self.badge = self.header_badge(f"0 de {len(slots)}")
+        _, lay = self.card("", "Progreso")
+        self.bar = QProgressBar()
+        self.bar.setRange(0, len(slots) + 1)   # +1: read-back verification
+        self.bar.setTextVisible(False)
+        lay.addWidget(self.bar)
+        self.step = QLabel()
+        lay.addWidget(self.step)
+        self.rows: list[QLabel] = []
+        for slot, name in zip(slots, names):
+            row = QLabel()
+            row.setObjectName("hint")
+            row.setProperty("text_", f"{slot_name(slot)} {name}".rstrip())
+            lay.addWidget(row)
+            self.rows.append(row)
+        self._mark(0)
+        self.status(self.step, "Conectando con la pedalera…")
+        self.close_btn = self.button("Cerrar", self.accept)
+        self.close_btn.setEnabled(False)
+        self.adjustSize()
+
+    def _mark(self, done: int, failed: bool = False) -> None:
+        for i, row in enumerate(self.rows):
+            text = row.property("text_")
+            if i < done:
+                row.setText(f'<span style="color:{OK}">✓</span>  {text}')
+            elif i == done:
+                row.setText(f'<span style="color:{ERROR if failed else TEXT}">{"✗" if failed else "●"}</span>  '
+                            f'<b>{text}</b>')
+            else:
+                row.setText(f"○  {text}")
+
+    def progress(self, text: str, n: int, total: int) -> None:
+        if n < 0:
+            self.status(self.step, text)
+            return
+        self.done_count = n
+        self.bar.setValue(n)
+        self.badge.setText(f"{min(n + 1, total)} de {total}" if n < total else f"{total} de {total}")
+        self._mark(n)
+        self.status(self.step, text)
+
+    def reject(self) -> None:
+        if not self.running:
+            super().reject()
+
+    def finished(self, text: str) -> None:
+        self.running = False
+        self.bar.setValue(self.bar.maximum())
+        self.badge.setText(f"{len(self.slots)} de {len(self.slots)}")
+        self._mark(len(self.slots))
+        self.status(self.step, text, True)
+        self.close_btn.setEnabled(True)
+        self.close_btn.setObjectName("primary")
+        self.close_btn.style().unpolish(self.close_btn)
+        self.close_btn.style().polish(self.close_btn)
+        timer = QTimer(self)   # child timer: dies with the dialog if the user closes it first
+        timer.setSingleShot(True)
+        timer.timeout.connect(self.accept)
+        timer.start(1500)
+
+    def failed(self, text: str) -> None:
+        self.running = False
+        self._mark(self.done_count, failed=True)
+        self.status(self.step, text, False)
+        self.step.setWordWrap(True)
+        self.close_btn.setEnabled(True)
+        self.adjustSize()
+
+
+class ArtistLibrary(StyledDialog):
+    """Ready-made presets inspired by bands, in banks of four. Load one preset into the selected
+    slot or the whole bank into a pedal bank; optionally upload it straight away."""
+
+    def __init__(self, main):
+        total = sum(len(b.presets) for b in artists.BANKS)
+        super().__init__(main, "Biblioteca de sonidos",
+                         f"{len(artists.BANKS)} bancos y {total} presets inspirados en bandas y estilos, sin usar IA. "
+                         "Cada banda trae Limpio (o Crunch), Rítmica, Variante y Solo. Son aproximaciones: ajusta "
+                         "gain y volumen a tu guitarra.", 960, 660)
+        self.target = self.header_badge()
+        cols = QHBoxLayout()
+        cols.setSpacing(12)
+        self.body.addLayout(cols, 1)
+
+        left, llay = self._card("1", "Banda o estilo")
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Buscar banda, canción o estilo: metallica, death, solo…")
+        self.search.textChanged.connect(self.populate)
+        llay.addWidget(self.search)
+        self.list = QListWidget()
+        self.list.currentRowChanged.connect(self._bank_changed)
+        self.list.itemDoubleClicked.connect(lambda _: self.apply_bank())
+        self.list.setToolTip("Doble clic: cargar los 4 presets en el banco elegido")
+        llay.addWidget(self.list, 1)
+        cols.addWidget(left, 2)
+
+        right, rlay = self._card("2", "Presets del banco")
+        self.preset_group = QButtonGroup(self)
+        self.preset_cards: list[QToolButton] = []
+        for i in range(4):
+            b = self.mode_card("")
+            b.setMinimumHeight(84)
+            b.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            b.clicked.connect(self._update_buttons)
+            b.setStyleSheet("QToolButton#modeCard { text-align: left; }")
+            self.preset_group.addButton(b, i)
+            self.preset_cards.append(b)
+            rlay.addWidget(b)
+        dest = QHBoxLayout()
+        dest.addWidget(QLabel("Cargar los 4 en:"))
+        self.dest = QComboBox()
+        for b in range(9):
+            alias = main.aliases.bank(b)
+            self.dest.addItem(f"Banco {b + 1}" + (f" · {alias}" if alias else ""), b)
+        self.dest.setCurrentIndex(main.current // 4)
+        self.dest.currentIndexChanged.connect(self._update_buttons)
+        dest.addWidget(self.dest, 1)
+        rlay.addLayout(dest)
+        self.upload = QCheckBox("Subir a la pedalera al aplicar")
+        self.upload.setChecked(main.connected and main.device is not None)
+        self.upload.setEnabled(main.connected and main.device is not None)
+        if not self.upload.isEnabled():
+            self.upload.setToolTip("Pedalera no conectada: los cambios quedan en el editor.")
+        rlay.addWidget(self.upload)
+        rlay.addStretch()
+        cols.addWidget(right, 3)
+
+        self.button("Cerrar", self.reject)
+        self.bank_btn = self.button("", self.apply_bank)
+        self.one_btn = self.button("", self.apply_one, "primary")
+        self.banks: list[artists.StyleBank] = []
+        self.populate()
+
+    def _card(self, number: str, title: str) -> tuple[QFrame, QVBoxLayout]:
+        card, lay = self.card(number, title)
+        self.body.removeWidget(card)   # card() adds to the body; here it goes into a column
+        return card, lay
+
+    def populate(self) -> None:
+        query = self.search.text().strip().lower()
+        self.list.blockSignals(True)
+        self.list.clear()
+        self.banks = []
+        for genre in artists.GENRES:
+            banks = [b for b in artists.BANKS if b.genre == genre and (
+                not query or query in f"{b.genre} {b.name} ".lower()
+                + " ".join(f"{p.name} {p.desc}" for p in b.presets).lower())]
+            if not banks:
+                continue
+            head = QListWidgetItem(genre.upper())
+            head.setFlags(Qt.NoItemFlags)
+            self.list.addItem(head)
+            self.banks.append(None)
+            for b in banks:
+                self.list.addItem("   " + b.name)
+                self.banks.append(b)
+        self.list.blockSignals(False)
+        first = next((i for i, b in enumerate(self.banks) if b is not None), -1)
+        self.list.setCurrentRow(first)
+        self._bank_changed(first)
+
+    def _bank(self) -> artists.StyleBank | None:
+        row = self.list.currentRow()
+        return self.banks[row] if 0 <= row < len(self.banks) else None
+
+    def _bank_changed(self, _row: int) -> None:
+        bank = self._bank()
+        for i, card in enumerate(self.preset_cards):
+            card.setVisible(bank is not None)
+            if bank is not None:
+                p = bank.presets[i]
+                card.setText(f"{'ABCD'[i]} · {p.role.upper()}   {p.name}\n{p.desc}\n{p.summary()}")
+        if bank is not None and self.preset_group.checkedId() < 0:
+            self.preset_cards[0].setChecked(True)
+        self._update_buttons()
+
+    def _update_buttons(self) -> None:
+        bank = self._bank()
+        dest = self.dest.currentData() + 1
+        self.one_btn.setText(f"Aplicar a {slot_name(self.main.current)}")
+        self.bank_btn.setText(f"Cargar los 4 en banco {dest}")
+        self.one_btn.setEnabled(bank is not None)
+        self.bank_btn.setEnabled(bank is not None)
+        self.target.setText(f"Seleccionado: {slot_name(self.main.current)}")
+
+    def apply_one(self) -> None:
+        bank = self._bank()
+        if bank is None:
+            return
+        p = bank.presets[max(0, self.preset_group.checkedId())]
+        like = self.main.local.presets[self.main.current]
+        self.main.apply_presets(self.main.current, [(p.build(like), p.name)], upload=self.upload.isChecked(),
+                                what=f"«{p.name}»")
+        self.accept()
+
+    def apply_bank(self) -> None:
+        bank = self._bank()
+        if bank is None:
+            return
+        first = self.dest.currentData() * 4
+        if not ask(self, "Cargar banco", f"Se reemplazarán los 4 presets del banco {first // 4 + 1} "
+                                         f"por «{bank.name}».\n¿Continuar?"):
+            return
+        items = [(p.build(self.main.local.presets[first + i]), p.name) for i, p in enumerate(bank.presets)]
+        self.main.apply_presets(first, items, bank.name, upload=self.upload.isChecked(), what=f"«{bank.name}»")
+        self.accept()
 
 
 class BackupManager(StyledDialog):
@@ -495,8 +716,8 @@ class AIDialog(StyledDialog):
 
     KEY_URLS = {"claude": "https://console.anthropic.com/settings/keys",
                 "openai": "https://platform.openai.com/api-keys"}
-    SUGGESTIONS = ["Crunch tipo AC/DC", "Limpio con chorus de los 80", "Blues tipo SRV", "Solo con delay largo",
-                   "Metal moderno muy apretado", "Ambiental para arpegios", "Funk limpio y brillante"]
+    SUGGESTIONS = ["Crunch tipo AC/DC", "Rítmica de Master of Puppets", "Death sueco con HM-2", "Korn afinado grave",
+                   "Solo de Blind Guardian", "Limpio con chorus de los 80", "Blues tipo SRV", "Ambiental para arpegios"]
 
     def __init__(self, main):
         super().__init__(main, "✨ Crear preset con IA", "Describe el sonido con tus palabras; la IA ajusta "
@@ -702,7 +923,9 @@ class AIDialog(StyledDialog):
         self.scope_hint.setText("La IA crea 4 presets coherentes (A–D) y nombra el banco." if bank else
                                 "La IA crea un solo preset para la posición seleccionada.")
         first = self.main.current // 4 + 1
-        self.apply_btn.setText(f"Aplicar al banco {first}" if bank else f"Aplicar a {slot_name(self.main.current)}")
+        upload = " y subir" if self.main.connected and self.main.device is not None else ""
+        self.apply_btn.setText(f"Aplicar{upload} al banco {first}" if bank
+                               else f"Aplicar{upload} a {slot_name(self.main.current)}")
         self.prompt.setPlaceholderText("Ej.: banco para tocar rock de los 70: limpio, crunch, rítmica y solo" if bank
                                        else "Ej.: crunch cálido para riffs de rock clásico, con un poco de reverb")
         self.result = None

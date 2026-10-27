@@ -265,6 +265,7 @@ class TankG:
         self.t = transport
         self.info = info
         self._buf = bytearray()
+        self.bank: Bank | None = None   # bank read by open(); saves a second read in callers
 
     @classmethod
     def open(cls, info: DeviceInfo | None = None) -> "TankG":
@@ -280,7 +281,7 @@ class TankG:
                 error = e
                 continue
             try:
-                dev.read_bank()   # identifies the model: only a Tank-G returns an A5 5A 758-byte bank
+                dev.bank = dev.read_bank()   # identifies the model: only a Tank-G returns an A5 5A 758-byte bank
                 return dev
             except DeviceError as e:
                 dev.close()
@@ -362,12 +363,15 @@ class TankG:
         self.t.write(bytes([0xC0, slot]))
 
     def write_presets(self, target: Bank, slots: list[int], progress=None) -> Bank:
-        """Write the given slots, then read back and verify. Returns the bank read back."""
+        """Write the given slots, then read back and verify. Returns the bank read back.
+        No pause before the read-back: the pedal already returns the new data after the ACK
+        (research/FINDINGS.md, even before COMMIT)."""
         for n, slot in enumerate(slots):
             if progress:
                 progress(n, len(slots), slot)
             self.write_preset(slot, target.presets[slot])
-        time.sleep(0.5)
+        if progress:
+            progress(len(slots), len(slots), None)
         after = self.read_bank()
         bad = [s for s in slots if after.presets[s] != target.presets[s]]
         if bad:
