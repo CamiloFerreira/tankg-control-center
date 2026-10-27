@@ -13,6 +13,12 @@ No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
 ## Novedades
 
+- **Linux:** el ejecutable ya no se cierra al abrir con «Could not load the Qt platform plugin xcb»
+  (pasaba sin `libxcb-cursor0` instalada o si la sesión fuerza `QT_QPA_PLATFORM=xcb`, como hace
+  Flameshot). Ahora la librería va dentro del ejecutable y, si hiciera falta, usa Wayland.
+
+## Versión 1.6
+
 - **Bluetooth (Tank-G v2), sin cable:**
   - **Android:** empareja la pedalera en los ajustes de Android y la app se conecta sola al abrirse
     (como la app oficial). Si la apagas y la enciendes, se reconecta.

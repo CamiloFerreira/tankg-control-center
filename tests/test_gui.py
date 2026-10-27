@@ -152,3 +152,18 @@ def test_library_offline_keeps_changes_in_editor(env):
     lib = dialogs.ArtistLibrary(w)
     lib.search.setText("zzzz")
     assert not lib.one_btn.isEnabled() and not lib.bank_btn.isEnabled()
+
+
+def test_qt_platform_falls_back_to_wayland_when_xcb_cannot_start(monkeypatch, tmp_path):
+    """Flameshot sets QT_QPA_PLATFORM=xcb; without libxcb-cursor X11 aborts, so use Wayland."""
+    monkeypatch.setattr(gui.sys, "platform", "linux")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "xcb")
+    monkeypatch.setattr(gui, "_xcb_cursor_available", lambda: False)
+    gui._choose_qt_platform()
+    assert os.environ["QT_QPA_PLATFORM"] == "wayland"
+    monkeypatch.setenv("QT_QPA_PLATFORM", "xcb")
+    monkeypatch.setattr(gui, "_xcb_cursor_available", lambda: True)   # bundled in the executable
+    gui._choose_qt_platform()
+    assert os.environ["QT_QPA_PLATFORM"] == "xcb"
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"   # keep the other tests headless

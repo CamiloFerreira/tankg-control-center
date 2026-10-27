@@ -25,6 +25,18 @@ args = [
     "--specpath", str(ROOT / "build"),
 ]
 args += ["--collect-submodules", "bleak"]   # backends are imported by platform at run time
+if sys.platform.startswith("linux"):
+    # Qt >= 6.5 needs libxcb-cursor for X11 and many systems lack it: ship it next to the app.
+    import ctypes.util
+    import subprocess
+    lib = os.environ.get("XCB_CURSOR_LIB")
+    if not lib and ctypes.util.find_library("xcb-cursor"):
+        out = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True).stdout
+        lib = next((line.split("=>")[-1].strip() for line in out.splitlines() if "libxcb-cursor.so.0" in line), None)
+    if lib:
+        args += ["--add-binary", f"{lib}{SEP}."]
+    else:
+        print("aviso: libxcb-cursor no encontrada; el ejecutable dependerá de la del sistema para X11")
 if sys.platform == "win32":
     args += ["--windowed", "--icon", str(ROOT / "packaging/icon.ico"), "--collect-submodules", "winrt"]
 else:

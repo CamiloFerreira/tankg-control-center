@@ -1357,10 +1357,20 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+def _xcb_cursor_available() -> bool:
+    """Qt >= 6.5 needs libxcb-cursor for X11: from the system or bundled in the executable."""
+    bundled = Path(getattr(sys, "_MEIPASS", "")) / "libxcb-cursor.so.0"
+    return bundled.exists() or ctypes.util.find_library("xcb-cursor") is not None
+
+
 def _choose_qt_platform() -> None:
-    """Qt >= 6.5 needs libxcb-cursor0 for X11; on a Wayland session without it use Wayland
-    (same logic as run.sh, needed when started from the packaged executable)."""
-    if not sys.platform.startswith("linux") or os.environ.get("QT_QPA_PLATFORM"):
+    """Without libxcb-cursor X11 cannot start: use Wayland when the session has it (same logic
+    as run.sh). Also when the environment forces xcb (Flameshot, for one, sets
+    QT_QPA_PLATFORM=xcb in ~/.config/environment.d)."""
+    if not sys.platform.startswith("linux"):
+        return
+    forced = os.environ.get("QT_QPA_PLATFORM", "")
+    if forced and ("xcb" not in forced or _xcb_cursor_available()):
         return
     if not os.environ.get("WAYLAND_DISPLAY"):
         runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -1368,8 +1378,7 @@ def _choose_qt_platform() -> None:
         if sockets:
             os.environ["WAYLAND_DISPLAY"] = sockets[0].name
     if os.environ.get("WAYLAND_DISPLAY"):
-        os.environ["QT_QPA_PLATFORM"] = "wayland" if ctypes.util.find_library("xcb-cursor") is None \
-            else "wayland;xcb"
+        os.environ["QT_QPA_PLATFORM"] = "wayland;xcb" if _xcb_cursor_available() else "wayland"
 
 
 def main() -> int:
