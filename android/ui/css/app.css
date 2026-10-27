@@ -19,6 +19,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
   padding: 10px 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .brand { display: flex; align-items: baseline; gap: 6px; margin-right: auto; white-space: nowrap; }
+.app-icon { width: 24px; height: 24px; align-self: center; }
 .logo { font-weight: 800; letter-spacing: 2px; }
 .sub { color: var(--dim); font-size: 13px; }
 .toolbar { display: none; }
@@ -87,8 +88,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .menu button:active { background: var(--teal); }
 
 .empty { max-width: 460px; margin: 10vh auto 0; padding: 0 20px; text-align: center; }
-.empty-logo { display: inline-block; font-weight: 800; letter-spacing: 4px; font-size: 20px; color: var(--ink);
-  background: linear-gradient(#38b3b0, #1c7674); border-radius: 12px; padding: 14px 22px; margin-bottom: 8px; }
+#mBody button.link { display: block; margin: 6px 0; padding: 4px 0; background: none; border: 0; color: var(--accent-h); text-decoration: underline; font-size: 15px; }
+.empty-icon { width: 96px; height: 96px; margin-bottom: 8px; }
 .empty h1 { font-size: 24px; }
 .empty p { color: var(--dim); }
 .empty .btn { display: block; width: 100%; margin-top: 10px; }

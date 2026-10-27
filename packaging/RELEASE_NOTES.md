@@ -11,7 +11,14 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
-## Novedades (1.7)
+## Novedades (1.7.1)
+
+- **Icono nuevo** en Linux, Windows y Android: una perilla con su arco de nivel.
+- **Política de privacidad y condiciones del servicio**, enlazadas desde Ayuda → Acerca de
+  (en Android, menú → Acerca de). Resumen: la app no tiene servidores ni telemetría, y Google
+  Drive solo ve los archivos que crea la propia app.
+
+## Versión 1.7
 
 - **Nube con Google Drive: los mismos presets en Linux, Windows y Android.**
   - Menú **Nube → Conectar con Google Drive**: la app copia un código y abre google.com/device;

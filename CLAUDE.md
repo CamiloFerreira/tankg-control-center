@@ -18,7 +18,7 @@ python3 tools/probe_read.py FIELD LENGTH SPACE              # read-only raw SysE
 
 Windows: `run.bat` (same behaviour). CI (`.github/workflows/tests.yml`) runs pytest + the offscreen GUI smoke test on ubuntu and windows.
 
-Executable: `.venv/bin/python packaging/build.py` (PyInstaller one-file → `dist/TankG`, `dist\TankG.exe` on Windows; bundles the factory bank and icon, found at runtime through `library.PROJECT_ROOT` = `sys._MEIPASS`). `packaging/install-linux.sh` installs it with a .desktop entry. Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds both and publishes a GitHub release with `packaging/RELEASE_NOTES.md`.
+Executable: `.venv/bin/python packaging/build.py` (PyInstaller one-file → `dist/TankG`, `dist\TankG.exe` on Windows; bundles the factory bank and icon, found at runtime through `library.PROJECT_ROOT` = `sys._MEIPASS`). `packaging/install-linux.sh` installs it with a .desktop entry. Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds both and publishes a GitHub release with `packaging/RELEASE_NOTES.md`. Brand icon: `packaging/icon.svg` is the only source; `packaging/make_icon.py` renders icon.png/.ico, the Android mipmaps, `docs/img/logo.png` and copies it to `android/ui/img/icon.svg`.
 
 ## Architecture
 

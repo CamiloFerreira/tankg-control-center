@@ -2,7 +2,7 @@
 // `device` = last bank read from the pedal, `local` = working copy; "modified" = slots that
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
-import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FIELDS, LIBRARY, RELEASES_REPO, VERSION } from "./data.js";
+import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FIELDS, LEGAL, LIBRARY, RELEASES_REPO, VERSION } from "./data.js";
 import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 import { fromText as aiFromText, generate as generateAI, webPrompt } from "./ai.js";
 import { parseBankFile, parsePresetFile, parseSetFile, presetFile, setFile, stamp } from "./files.js";
@@ -1243,9 +1243,18 @@ async function run(cmd) {
       }
       return;
     case "about":
-      return info("Tank-G Control Center", `Versión ${appVersion()}\n\nEditor de presets para la M-VAVE Tank-G: la misma app en ` +
+      info("Tank-G Control Center", `Versión ${appVersion()}\n\nEditor de presets para la M-VAVE Tank-G: la misma app en ` +
         "Windows, Linux y Android, con el protocolo verificado, backup antes de escribir y verificación por relectura.\n\n" +
         "Conecta la pedalera por USB-OTG o emparéjala por Bluetooth (Tank-G v2).");
+      $("mBody").innerHTML = "";
+      for (const [text, url] of [["Política de privacidad", LEGAL.privacy], ["Condiciones del servicio", LEGAL.terms]]) {
+        const b = document.createElement("button");
+        b.className = "link";
+        b.textContent = text;
+        b.onclick = () => A.openUrl(url);
+        $("mBody").append(b);
+      }
+      return;
   }
 }
 

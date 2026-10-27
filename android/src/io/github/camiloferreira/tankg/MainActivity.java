@@ -599,6 +599,7 @@ public class MainActivity extends Activity {
             if (path.endsWith(".js")) return "text/javascript";
             if (path.endsWith(".css")) return "text/css";
             if (path.endsWith(".png")) return "image/png";
+            if (path.endsWith(".svg")) return "image/svg+xml";
             if (path.endsWith(".json") || path.endsWith(".webmanifest")) return "application/json";
             return "application/octet-stream";
         }

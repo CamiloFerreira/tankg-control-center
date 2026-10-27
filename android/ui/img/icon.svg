@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f2a30"/><stop offset="1" stop-color="#0d1316"/>
+    </linearGradient>
+    <radialGradient id="knob" cx="0.38" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#f2f4f5"/><stop offset="0.45" stop-color="#9aa3a8"/><stop offset="1" stop-color="#3c4448"/>
+    </radialGradient>
+    <linearGradient id="arc" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2bb3a3"/><stop offset="1" stop-color="#ff9a1f"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="none" stroke="#2bb3a3" stroke-opacity="0.35" stroke-width="6"/>
+  <!-- level arc: 270 degree track with a gap at the bottom, filled to ~80% -->
+  <path d="M 143.3 368.7 A 160 160 0 1 1 368.7 368.7" fill="none" stroke="#2a363c" stroke-width="34" stroke-linecap="round"/>
+  <path d="M 143.3 368.7 A 160 160 0 1 1 410.4 214.6" fill="none" stroke="url(#arc)" stroke-width="34" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="104" fill="#0a0f11"/>
+  <circle cx="256" cy="256" r="92" fill="url(#knob)"/>
+  <line x1="256" y1="256" x2="326" y2="237" stroke="#0d1316" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="14" fill="#0d1316"/>
+</svg>

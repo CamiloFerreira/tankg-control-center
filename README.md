@@ -1,3 +1,5 @@
+<img src="docs/img/logo.png" width="96" align="right" alt="">
+
 # Tank-G Control Center
 
 Gestor de presets para la pedalera **M-VAVE Tank-G** en **Windows, Linux y Android** (teléfono y
@@ -205,3 +207,9 @@ Detalle en [research/FINDINGS.md](research/FINDINGS.md).
 
 El banco de fábrica se toma de `research/factory/tankG_am4_preset.bin` (extraído de M-EFCS,
 propiedad de M-VAVE, solo para uso local) o de `~/.local/share/tankg/factory.tgbank`.
+
+## Privacidad y condiciones
+
+- [Política de privacidad](docs/PRIVACY.md): sin servidores, sin cuentas, sin telemetría; Google
+  Drive (opcional) solo ve los archivos que la app crea.
+- [Condiciones del servicio](docs/TERMS.md): app gratuita, sin garantía, no afiliada a M-VAVE.

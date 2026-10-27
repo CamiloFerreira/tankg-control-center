@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import cloud, dialogs, library, theme, updater
-from .version import __version__
+from .version import PRIVACY_URL, TERMS_URL, __version__
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_of
 
@@ -1478,10 +1478,12 @@ class MainWindow(QMainWindow):
 
     def about(self) -> None:
         QMessageBox.about(self, "Tank-G Control Center",
-                          f"Versión {__version__}\n\n"
-                          "Gestor de presets para M-VAVE Tank-G en Windows, Linux y Android.\n\n"
-                          "Protocolo: SysEx de M-EFCS (research/FINDINGS.md).\n"
-                          f"Backups automáticos en {library.BACKUP_DIR}")
+                          f"<p><b>Versión {__version__}</b></p>"
+                          "<p>Gestor de presets para M-VAVE Tank-G en Windows, Linux y Android.</p>"
+                          "<p>Protocolo: SysEx de M-EFCS (research/FINDINGS.md).<br>"
+                          f"Backups automáticos en {library.BACKUP_DIR}</p>"
+                          f'<p><a href="{PRIVACY_URL}">Política de privacidad</a> · '
+                          f'<a href="{TERMS_URL}">Condiciones del servicio</a></p>')
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API
         if self.modified_slots() and not dialogs.ask(
