@@ -3,7 +3,7 @@
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
 import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FIELDS, LIBRARY, RELEASES_REPO, VERSION } from "./data.js";
-import { Bank, DeviceError, SLOTS, TankG, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
+import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 import { fromText as aiFromText, generate as generateAI, webPrompt } from "./ai.js";
 import { parseBankFile, parsePresetFile, parseSetFile, presetFile, setFile, stamp } from "./files.js";
 
@@ -155,7 +155,7 @@ function paintFader(el, v) {
 function render() {
   const connected = !!S.dev;
   const st = $("status");
-  st.textContent = S.demo ? "Demo" : connected ? "Conectada" : "Desconectada";
+  st.textContent = S.demo ? "Demo" : connected ? (S.dev.bluetooth ? "Conectada · Bluetooth" : "Conectada") : "Desconectada";
   st.className = "pill " + (S.demo ? "demo" : connected ? "on" : "off");
   $("connect").hidden = connected;
   const has = !!S.local;
@@ -827,7 +827,8 @@ async function toggleLive() {
 // MIDI port ---------------------------------------------------------------------------------------
 
 async function midiDevices() {
-  if (ANDROID) return JSON.parse(globalThis.AndroidMidi.list()).map(d => d.name);
+  if (ANDROID) return [...JSON.parse(globalThis.AndroidMidi.list()).map(d => d.name),
+    ...androidBluetoothPedals().map(p => `${p.name} (Bluetooth)`)];
   const access = await midiAccess();
   return [...access.outputs.values()].map(o => o.name);
 }
@@ -1293,6 +1294,10 @@ if (ANDROID) {
   S.wanted = true;
   midiAccess().then(watchPorts);
   connect(true);
+  // A Bluetooth pedal sends no "plugged in" event: retry quietly while the app is open, like M-EFCS.
+  setInterval(() => {
+    if (S.wanted && !S.dev && !S.busy && !S.demo && document.visibilityState === "visible" && androidBluetoothPedals().length) connect(true);
+  }, 15000);
 } else {
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
   // Reconnect without a prompt when MIDI permission was already granted.

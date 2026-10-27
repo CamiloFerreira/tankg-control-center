@@ -172,6 +172,106 @@ export class TankG {
   }
 }
 
+// Bluetooth LE ----------------------------------------------------------------------------------
+// The official app talks to the Tank-G v2 over the Jieli serial service (write ae41, notify ae42)
+// with its own framing; captured on 2026-10-27 (research/FINDINGS.md):
+//   00 59 | cmd | len u16 LE | 00 | f1 u32 LE | f2 u32 LE | data | ck      ck = 0xFF - Σ(f1,f2,data)
+//   f1 = addr << 8 | 4        f2 = len << 8 | space << 4        (same memory map as USB)
+//   cmd 23 read  -> reply cmd 23 with f1 f2 echoed + data;  cmd 22 write -> ACK 00 59 00 01 00 00 00 ff
+//   space 0 = bank (addr 2 + 21*slot), F = commit (len 0), E = select preset (addr = slot, data 01)
+export const BLE_SERVICE = "0000ae40-0000-1000-8000-00805f9b34fb";
+export const BLE_TX = "0000ae41-0000-1000-8000-00805f9b34fb";
+export const BLE_RX = "0000ae42-0000-1000-8000-00805f9b34fb";
+const BLE_READ = 0x23, BLE_WRITE = 0x22, BLE_CHUNK = 200;
+const le32 = v => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+
+export function bleFrame(cmd, space, addr, len, data = []) {
+  const payload = [...le32((addr << 8) | 4), ...le32((len << 8) | (space << 4)), ...data];
+  const ck = (0xff - payload.reduce((a, b) => a + b, 0)) & 0xff;
+  return Uint8Array.from([0x00, 0x59, cmd, payload.length & 0xff, payload.length >> 8, 0x00, ...payload, ck]);
+}
+
+/** Splits the notification stream into frames (a reply can span several notifications). */
+export class BleDeframer {
+  constructor() { this.buf = []; }
+  push(bytes) {
+    this.buf.push(...bytes);
+    const out = [];
+    for (;;) {
+      const start = this.buf.findIndex((b, i) => b === 0x00 && this.buf[i + 1] === 0x59);
+      if (start < 0) { this.buf = this.buf.slice(-1); return out; }
+      if (start > 0) this.buf = this.buf.slice(start);
+      if (this.buf.length < 6) return out;
+      const total = 6 + (this.buf[3] | (this.buf[4] << 8)) + 1;
+      if (this.buf.length < total) return out;
+      const f = this.buf.slice(0, total);
+      this.buf = this.buf.slice(total);
+      const payload = f.slice(6, -1);
+      if (((0xff - payload.reduce((a, b) => a + b, 0)) & 0xff) === f[total - 1]) out.push({ cmd: f[2], payload });
+    }
+  }
+}
+
+/** Same interface as TankG (readBank, writePresets, selectPreset) over the Bluetooth framing. */
+export class TankGBle {
+  constructor(transport) {
+    this.t = transport;
+    this.waiters = [];
+    const deframer = new BleDeframer();
+    transport.onMessage(bytes => {
+      for (const f of deframer.push(bytes))
+        for (const w of [...this.waiters]) {
+          const r = w.accept(f);
+          if (r !== undefined && r !== null) { this.waiters.splice(this.waiters.indexOf(w), 1); w.resolve(r); }
+        }
+    });
+  }
+
+  transact(frame, accept, timeout = 3000) {
+    return new Promise(resolve => {
+      const w = { accept, resolve };
+      this.waiters.push(w);
+      setTimeout(() => { const i = this.waiters.indexOf(w); if (i >= 0) { this.waiters.splice(i, 1); resolve(null); } }, timeout);
+      if (!this.t.send(frame)) { this.waiters.splice(this.waiters.indexOf(w), 1); resolve(null); }
+    });
+  }
+
+  async read(space, addr, len) {
+    const frame = bleFrame(BLE_READ, space, addr, len);
+    const echo = Array.from(frame.slice(6, 14));
+    const data = await this.transact(frame, f => (f.cmd === BLE_READ && f.payload.length === 8 + len &&
+      echo.every((b, i) => f.payload[i] === b) ? f.payload.slice(8) : null));
+    if (!data) throw new DeviceError("La pedalera no respondió por Bluetooth.");
+    return data;
+  }
+
+  async write(space, addr, data, what) {
+    const ok = await this.transact(bleFrame(BLE_WRITE, space, addr, data.length, data),
+      f => (f.cmd === 0x00 && f.payload.length === 1 && f.payload[0] === 0x00 ? true : null));
+    if (!ok) throw new DeviceError(`La pedalera no confirmó: ${what}`);
+  }
+
+  async readBank() {
+    const bytes = [];
+    for (let addr = 0; addr < BANK_LEN; addr += BLE_CHUNK) bytes.push(...(await this.read(0, addr, Math.min(BLE_CHUNK, BANK_LEN - addr))));
+    try { return Bank.fromBytes(Uint8Array.from(bytes)); }
+    catch (e) { throw new DeviceError(`El dispositivo respondió pero no parece una Tank-G: ${e.message}`); }
+  }
+
+  async writePreset(slot, record) {
+    if (!(slot >= 0 && slot < SLOTS)) throw new Error("slot out of range");
+    await this.write(0, recordOffset(slot), Array.from(record), `escritura del preset ${slotName(slot)}`);
+    await this.write(SPACE_COMMIT, 0, [], "commit");
+  }
+
+  selectPreset(slot) {
+    if (!(slot >= 0 && slot < SLOTS)) throw new Error("slot out of range");
+    this.t.send(bleFrame(BLE_WRITE, 0xe, slot, 1, [1]));
+  }
+
+  writePresets(target, slots, progress) { return TankG.prototype.writePresets.call(this, target, slots, progress); }
+}
+
 // transports -------------------------------------------------------------------------------
 
 const PORT_HINTS = ["usb composite device", "tank", "m-vave", "mvave", "jieli"];
@@ -215,9 +315,55 @@ function androidOpen(id) {
   });
 }
 
+const bleWaiters = [];
+let bleIn = null;
+globalThis.__bleIn = hex => bleIn?.(fromHex(hex));
+globalThis.__bleState = (state, detail) => {
+  for (const w of bleWaiters.splice(0)) w(state, detail);
+  if (state === "disconnected") androidAccess.onstatechange?.({ port: { state: "disconnected", name: androidBleName } });
+};
+let androidBleName = "";
+
+/** Bluetooth pedals bonded in Android's settings (the APK asks for the permission). */
+export function androidBluetoothPedals() {
+  const A = globalThis.AndroidMidi;
+  if (!A?.blePedals || !A.blePermission()) return [];
+  return JSON.parse(A.blePedals());
+}
+
+async function openAndroidBle(pedal) {
+  const A = globalThis.AndroidMidi;
+  const state = await new Promise(resolve => {
+    bleWaiters.push(resolve);
+    A.bleOpen(pedal.address);
+    setTimeout(() => resolve("error", "tiempo agotado"), 12000);
+  });
+  if (state !== "ready") { A.bleClose(); throw new DeviceError(`No se pudo conectar por Bluetooth con ${pedal.name}.`); }
+  const dev = new TankGBle({
+    send: data => A.bleSend(toHex(data)),
+    onMessage: f => { bleIn = f; },
+    close: () => { bleIn = null; A.bleClose(); },
+  });
+  try { dev.bank = await dev.readBank(); } catch (e) { A.bleClose(); throw e; }
+  dev.portName = `${pedal.name} (Bluetooth)`;
+  androidBleName = dev.portName;
+  dev.access = androidAccess;
+  dev.bluetooth = true;
+  return dev;
+}
+
 async function openAndroidMidi(port) {
   const all = JSON.parse(globalThis.AndroidMidi.list());
-  if (!all.length) throw new DeviceError("No se ve ningún dispositivo MIDI. ¿La Tank-G está conectada por USB-OTG y encendida?");
+  const pedals = androidBluetoothPedals();
+  const wanted = port.endsWith(" (Bluetooth)") ? pedals.filter(p => `${p.name} (Bluetooth)` === port) : [];
+  if (wanted.length || (!all.length && pedals.length && !port)) {
+    let error;
+    for (const p of (wanted.length ? wanted : pedals)) {
+      try { return await openAndroidBle(p); } catch (e) { error = e; }
+    }
+    throw error;
+  }
+  if (!all.length) throw new DeviceError("No se ve la Tank-G. Conéctala por USB-OTG o emparéjala por Bluetooth en los ajustes de Android.");
   const devices = choose(all, port);
   if (!devices.length) throw new DeviceError("No se ve ningún dispositivo MIDI. ¿La Tank-G está conectada por USB-OTG y encendida?");
   let error;

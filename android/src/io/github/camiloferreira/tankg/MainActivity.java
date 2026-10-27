@@ -61,7 +61,9 @@ import java.util.Iterator;
  * Bridge (window.AndroidMidi): list() -> JSON [{id, name}], open(id) -> __midiOpened(id, ok, err),
  * send(hex), close(), saveFile(name, base64, mime), httpPost(id, url, headers, body) ->
  * __httpDone(id, status, text), openUrl(url), openChat(package, url, text), copyText(text), version(),
- * installUpdate(apkUrl, sumsUrl) -> __updateState(state, detail) (refuses an APK not in SHA256SUMS). Incoming complete SysEx frames ->
+ * installUpdate(apkUrl, sumsUrl) -> __updateState(state, detail) (refuses an APK not in SHA256SUMS),
+ * blePermission(), blePedals(), bleOpen(address) -> __bleState(state, detail), bleSend(hex),
+ * bleClose(); Bluetooth notifications -> __bleIn(hex). Incoming complete SysEx frames ->
  * __midiIn(hex); device plug/unplug -> __midiState(state, name). <input type=file> opens the
  * system file picker.
  */
@@ -70,6 +72,7 @@ public class MainActivity extends Activity {
     private static final String INSTALL_ACTION = "io.github.camiloferreira.tankg.INSTALL_STATUS";
     private static final int PICK_FILE = 1;
     private ValueCallback<Uri[]> pickCallback;
+    private Ble ble;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private WebView web;
@@ -112,6 +115,7 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "AndroidMidi");
         setContentView(web);
 
+        ble = new Ble(this, this::js);
         midi = (MidiManager) getSystemService(MIDI_SERVICE);
         if (midi != null) midi.registerDeviceCallback(deviceCallback, ui);
         if (state != null) web.restoreState(state);
@@ -141,6 +145,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        ble.close();
         try {
             unregisterReceiver(installReceiver);
         } catch (IllegalArgumentException ignored) {
@@ -150,6 +155,10 @@ public class MainActivity extends Activity {
         closeDevice();
         web.destroy();
         super.onDestroy();
+    }
+
+    private boolean bluetoothAllowed() {
+        return Build.VERSION.SDK_INT < 31 || checkSelfPermission("android.permission.BLUETOOTH_CONNECT") == PackageManager.PERMISSION_GRANTED;
     }
 
     private void js(String code) {
@@ -230,12 +239,14 @@ public class MainActivity extends Activity {
     };
 
     private class Bridge {
+        /** USB/virtual MIDI devices. */
         @JavascriptInterface
         public String list() {
             JSONArray out = new JSONArray();
             if (midi == null) return out.toString();
             for (MidiDeviceInfo info : midi.getDevices()) {
                 if (info.getInputPortCount() == 0 || info.getOutputPortCount() == 0) continue;
+                if (info.getType() == MidiDeviceInfo.TYPE_BLUETOOTH) continue;   // BLE goes through Ble (see below)
                 try {
                     out.put(new JSONObject().put("id", info.getId()).put("name", deviceName(info)));
                 } catch (Exception ignored) {
@@ -248,13 +259,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void open(int id) {
             closeDevice();
-            MidiDeviceInfo found = null;
-            for (MidiDeviceInfo info : midi.getDevices()) if (info.getId() == id) found = info;
-            if (found == null) {
-                js("__midiOpened(" + id + ",false,'no existe')");
-                return;
-            }
-            midi.openDevice(found, dev -> {
+            MidiManager.OnDeviceOpenedListener opened = dev -> {
                 if (dev == null) {
                     js("__midiOpened(" + id + ",false,'Android no pudo abrirlo')");
                     return;
@@ -271,7 +276,14 @@ public class MainActivity extends Activity {
                     fromPedal.connect(receiver);
                 }
                 js("__midiOpened(" + id + ",true,'')");
-            }, ui);
+            };
+            MidiDeviceInfo found = null;
+            for (MidiDeviceInfo info : midi.getDevices()) if (info.getId() == id) found = info;
+            if (found == null) {
+                js("__midiOpened(" + id + ",false,'no existe')");
+                return;
+            }
+            midi.openDevice(found, opened, ui);
         }
 
         @JavascriptInterface
@@ -290,6 +302,38 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void close() {
             closeDevice();
+        }
+
+        /** Android 12+: asks for the Bluetooth permissions; true when already granted. */
+        @JavascriptInterface
+        public boolean blePermission() {
+            if (Build.VERSION.SDK_INT < 31) return true;
+            String[] perms = {"android.permission.BLUETOOTH_CONNECT", "android.permission.BLUETOOTH_SCAN"};
+            boolean ok = checkSelfPermission(perms[0]) == PackageManager.PERMISSION_GRANTED
+                    && checkSelfPermission(perms[1]) == PackageManager.PERMISSION_GRANTED;
+            if (!ok) ui.post(() -> requestPermissions(perms, 7));
+            return ok;
+        }
+
+        /** Bonded Bluetooth pedals: JSON [{name, address}]. */
+        @JavascriptInterface
+        public String blePedals() {
+            return bluetoothAllowed() ? ble.pedals() : "[]";
+        }
+
+        @JavascriptInterface
+        public void bleOpen(String address) {
+            if (bluetoothAllowed()) ble.open(address);
+        }
+
+        @JavascriptInterface
+        public boolean bleSend(String hexData) {
+            return ble.send(unhex(hexData));
+        }
+
+        @JavascriptInterface
+        public void bleClose() {
+            ble.close();
         }
 
         @JavascriptInterface

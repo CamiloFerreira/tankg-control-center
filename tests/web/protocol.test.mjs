@@ -50,3 +50,54 @@ await assert.rejects(dev2.writePresets(t2, [0]), P.DeviceError);
 assert.equal(FIELDS.length, 18);
 assert.ok(LIBRARY.length >= 100 && LIBRARY.every(b => b.presets.length === 4 && b.presets.every(p => p.hex.length === 42)));
 console.log("web protocol ok");
+
+// Bluetooth framing: frames captured from the official app over BLE on 2026-10-27
+const rec9d = P.fromHex("010001011e07643e483c5f0000143c320f04ff0078");
+assert.equal(hex(P.bleFrame(0x23, 2, 0, 4)), "00 59 23 08 00 00 04 00 00 00 20 04 00 00 d7");
+assert.equal(hex(P.bleFrame(0x22, 0, 2 + 21 * 35, 21, Array.from(rec9d))),
+  "00 59 22 1d 00 00 04 e1 02 00 00 15 00 00 01 00 01 01 1e 07 64 3e 48 3c 5f 00 00 14 3c 32 0f 04 ff 00 78 4a");
+assert.equal(hex(P.bleFrame(0x22, 0xf, 0, 0)), "00 59 22 08 00 00 04 00 00 00 f0 00 00 00 0b");
+assert.equal(hex(P.bleFrame(0x22, 0xe, 35, 1, [1])), "00 59 22 09 00 00 04 23 00 00 e0 01 00 00 01 f6");
+// reply split across notifications, with garbage before it
+const d = new P.BleDeframer();
+const bleReply = P.fromHex("0059231d000004e1020000150000010001011e07643e483c5f0000143c320f04ff00784a");
+assert.deepEqual(d.push([0x7f, ...bleReply.slice(0, 10)]), []);
+const got = d.push(bleReply.slice(10));
+assert.equal(got.length, 1); assert.equal(got[0].cmd, 0x23); assert.deepEqual(got[0].payload.slice(8), Array.from(rec9d));
+
+// TankGBle against a fake pedal that speaks the captured framing
+function fakeBlePedal(image) {
+  const mem = Uint8Array.from(image); let cb = null; const sent = [];
+  const deframer = new P.BleDeframer();
+  return { mem, sent, onMessage: f => { cb = f; }, close() {},
+    send(frame) {
+      sent.push(Uint8Array.from(frame));
+      for (const f of deframer.push(Array.from(frame))) {
+        const f1 = f.payload[0] | f.payload[1] << 8 | f.payload[2] << 16, f2 = f.payload[4] | f.payload[5] << 8 | f.payload[6] << 16;
+        const addr = f1 >> 8, len = f2 >> 8, space = (f2 >> 4) & 0xf, data = f.payload.slice(8);
+        let out;
+        if (f.cmd === 0x23) {
+          const payload = [...f.payload.slice(0, 8), ...mem.slice(addr, addr + len)];
+          const ck = (0xff - payload.reduce((a, b) => a + b, 0)) & 0xff;
+          out = [0x00, 0x59, 0x23, payload.length & 0xff, payload.length >> 8, 0, ...payload, ck];
+        } else {
+          if (space === 0 && len) mem.set(data, addr);
+          out = [0x00, 0x59, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff];
+        }
+        // deliver in 2 chunks like MTU-limited notifications
+        setTimeout(() => { cb?.(Uint8Array.from(out.slice(0, 9))); cb?.(Uint8Array.from(out.slice(9))); }, 1);
+      }
+      return true;
+    } };
+}
+const bp = fakeBlePedal(LIVE);
+const bdev = new P.TankGBle(bp);
+const bbank = await bdev.readBank();
+assert.deepEqual(bbank.toBytes(), LIVE);
+const bt = bbank.copy(); bt.presets[35] = rec9d;
+const bafter = await bdev.writePresets(bt, [35]);
+assert.equal(hex(bafter.presets[35]), hex(rec9d));
+assert.ok(bp.sent.some(f => hex(f) === "00 59 22 08 00 00 04 00 00 00 f0 00 00 00 0b"), "commit sent");
+bdev.selectPreset(35);
+assert.equal(hex(bp.sent.at(-1)), "00 59 22 09 00 00 04 23 00 00 e0 01 00 00 01 f6");
+console.log("bluetooth framing ok");
