@@ -246,6 +246,18 @@ class Settings:
             self.data.pop("ble", None)
         self.save()
 
+    @property
+    def cloud(self) -> dict:
+        """{"refresh_token", "synced": "updated" of the cloud version this device last matched}."""
+        return self.data.get("cloud", {})
+
+    def set_cloud(self, cloud: dict | None) -> None:
+        if cloud:
+            self.data["cloud"] = cloud
+        else:
+            self.data.pop("cloud", None)
+        self.save()
+
     def set_midi_ports(self, ports: tuple[str, str] | None) -> None:
         if ports:
             self.data["midi_in"], self.data["midi_out"] = ports

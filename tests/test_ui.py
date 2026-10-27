@@ -76,3 +76,17 @@ def test_chat_apps_declared_in_android_manifest():
         assert site in ai.WEB_SITES
         if app["android"]:
             assert f'<package android:name="{app["android"]}" />' in manifest, site
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_ui_cloud_reads_desktop_documents(tmp_path):
+    """cloud.js syncs through the APK bridge and reads what tankg/cloud.py writes."""
+    import json
+    from tankg import cloud
+    from tankg.model import Bank
+    doc = cloud.make_doc(Bank.from_bytes((ROOT / "tests/live_bank.bin").read_bytes()), {"1A": "Limpio ñ"}, {"1": "Rock"})
+    f = tmp_path / "doc.json"
+    f.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    r = subprocess.run(["node", str(ROOT / "tests/ui/cloud.test.mjs"), str(f)], capture_output=True, text=True,
+                       encoding="utf-8", timeout=60)
+    assert r.returncode == 0, r.stderr + r.stdout

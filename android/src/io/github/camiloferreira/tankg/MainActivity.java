@@ -59,7 +59,7 @@ import java.util.Iterator;
  * localStorage work like on a normal secure origin.
  *
  * Bridge (window.AndroidMidi): list() -> JSON [{id, name}], open(id) -> __midiOpened(id, ok, err),
- * send(hex), close(), saveFile(name, base64, mime), httpPost(id, url, headers, body) ->
+ * send(hex), close(), saveFile(name, base64, mime), httpRequest(id, method, url, headers, body) ->
  * __httpDone(id, status, text), openUrl(url), openChat(package, url, text), copyText(text), version(),
  * installUpdate(apkUrl, sumsUrl) -> __updateState(state, detail) (refuses an APK not in SHA256SUMS),
  * blePermission(), blePedals(), bleOpen(address) -> __bleState(state, detail), bleSend(hex),
@@ -406,22 +406,31 @@ public class MainActivity extends Activity {
         /** POST for the AI providers (no CORS, local servers work). Answer -> __httpDone. */
         @JavascriptInterface
         public void httpPost(int id, String url, String headersJson, String body) {
+            httpRequest(id, "POST", url, headersJson, body);
+        }
+
+        /** GET / POST / DELETE (AI providers, Google sign-in and Drive). Answer -> __httpDone(id, status, text). */
+        @JavascriptInterface
+        public void httpRequest(int id, String method, String url, String headersJson, String body) {
             new Thread(() -> {
                 int status = 0;
                 String text;
                 try {
                     HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                    c.setRequestMethod("POST");
+                    c.setRequestMethod(method);
                     c.setConnectTimeout(20000);
                     c.setReadTimeout(120000);
-                    c.setDoOutput(true);
+                    boolean hasBody = body != null && !body.isEmpty();
+                    c.setDoOutput(hasBody);
                     JSONObject h = new JSONObject(headersJson);
                     for (Iterator<String> it = h.keys(); it.hasNext(); ) {
                         String k = it.next();
                         c.setRequestProperty(k, h.getString(k));
                     }
-                    try (OutputStream out = c.getOutputStream()) {
-                        out.write(body.getBytes(StandardCharsets.UTF_8));
+                    if (hasBody) {
+                        try (OutputStream out = c.getOutputStream()) {
+                            out.write(body.getBytes(StandardCharsets.UTF_8));
+                        }
                     }
                     status = c.getResponseCode();
                     InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();

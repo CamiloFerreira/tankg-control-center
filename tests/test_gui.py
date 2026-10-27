@@ -167,3 +167,34 @@ def test_qt_platform_falls_back_to_wayland_when_xcb_cannot_start(monkeypatch, tm
     gui._choose_qt_platform()
     assert os.environ["QT_QPA_PLATFORM"] == "xcb"
     os.environ["QT_QPA_PLATFORM"] = "offscreen"   # keep the other tests headless
+
+
+def test_cloud_sync_push_after_save_and_offer_newer(env, tmp_path, monkeypatch):
+    import json
+    from test_tankg import FakeGoogle
+    from tankg import cloud
+    w, pedal, wait, _ = env
+    google = FakeGoogle()
+    monkeypatch.setattr(cloud, "_request", google)
+    monkeypatch.setattr(cloud, "CLIENT_ID", "id")
+    monkeypatch.setattr(cloud, "CLIENT_SECRET", "secret")
+    monkeypatch.setattr(library, "SETTINGS_FILE", tmp_path / "settings.json")
+    library.Settings().set_cloud({"refresh_token": "r"})
+    p = w.local.presets[0].copy()
+    p.set("gain", 21)
+    w._set_local(0, p)
+    w.aliases.set_preset(0, "Desde Linux")
+    w.send_selected()   # verified write -> automatic push
+    assert wait(lambda: not w.busy) and wait(lambda: len(google.files) == 1 and not w._bg)
+    doc = json.loads(next(iter(google.files.values()))["body"])
+    assert bytes.fromhex(doc["bank"])[2:23] == p.to_bytes() and doc["aliases"]["presets"]["1A"] == "Desde Linux"
+    # another device (the phone) saves a newer version
+    other = w.device.copy()
+    other.presets[1].set("gain", 99)
+    newer = cloud.make_doc(other, {"1B": "Desde Android"}, {}, "Android · moto")
+    next(iter(google.files.values()))["body"] = json.dumps(newer).encode()
+    w.cloud_check()
+    assert wait(lambda: not w._bg)
+    assert w.local.presets[1].get("gain") == 99 and w.aliases.preset(1) == "Desde Android"
+    assert set(w.modified_slots()) >= {1}   # in the editor only, until «Guardar cambios»
+    assert library.Settings().cloud["synced"] == cloud.doc_key(newer)

@@ -6,6 +6,7 @@ import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FIELDS, LIBRARY, RELEA
 import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 import { fromText as aiFromText, generate as generateAI, webPrompt } from "./ai.js";
 import { parseBankFile, parsePresetFile, parseSetFile, presetFile, setFile, stamp } from "./files.js";
+import * as cloud from "./cloud.js";
 
 const $ = id => document.getElementById(id);
 const F = Object.fromEntries(FIELDS.map(f => [f.key, f]));
@@ -334,6 +335,7 @@ async function connect(silent = false) {
     watchPorts(dev.access);
     adoptBank(dev.bank, fromDemo);
     toast(`Tank-G conectada (${S.dev.portName})`);
+    if (!cloudChecked) { cloudChecked = true; setTimeout(() => cloudCheck(), 500); }
   } catch (e) {
     S.dev = null;
     if (!silent) {
@@ -468,6 +470,7 @@ async function upload(slots, selectSlot = null) {
     });
     S.device = after;
     if (selectSlot !== null) S.dev.selectPreset(selectSlot);
+    cloudPush();
     mark(total);
     $("mBar").firstElementChild.style.width = "100%";
     step(`✓ ${total} preset${total > 1 ? "s" : ""} guardado${total > 1 ? "s" : ""} y verificado${total > 1 ? "s" : ""}`, "ok");
@@ -1022,11 +1025,101 @@ globalThis.__updateState = (state, detail) => {
   $("mClose").onclick = closeModal;
 };
 
+// cloud (Google Drive): same files as the desktop app ---------------------------------------------
+
+const cloudState = () => store.get("tankg.cloud", {});
+const setCloud = v => store.set("tankg.cloud", v);
+const drive = () => (cloud.configured() && cloudState().refreshToken ? new cloud.Drive(cloudState().refreshToken) : null);
+let cloudChecked = false;
+
+async function cloudConnect() {
+  if (!cloud.configured()) return info("Nube", "Esta versión no tiene configurada la sincronización con Google Drive.");
+  let code;
+  try { code = await cloud.startSignIn(); } catch (e) { return info("Nube", e.message); }
+  let cancelled = false;
+  modal({ title: "Conectar con Google Drive", step: `1. Se abrirá Google: pega el código (ya está copiado)\n2. Elige tu cuenta y pulsa «Permitir»\n\nCódigo: ${code.userCode}`,
+    ok: "Abrir Google", cancel: "Cancelar" });
+  A.copyText(code.userCode);
+  $("mOk").onclick = () => A.openUrl(code.url);
+  $("mClose").onclick = () => { cancelled = true; closeModal(); };
+  A.openUrl(code.url);
+  try {
+    const token = await cloud.finishSignIn(code, () => cancelled);
+    setCloud({ refreshToken: token });
+    closeModal();
+    toast("Conectado con Google Drive: los presets se sincronizan solos", 4000);
+    cloudCheck({ afterConnect: true });
+  } catch (e) {
+    if (!cancelled) { $("mStep").textContent = e.message; $("mStep").className = "bad"; $("mOk").hidden = true; }
+  }
+}
+
+async function cloudPush(quiet = true) {
+  const d = drive();
+  if (!d) { if (!quiet) cloudConnect(); return; }
+  const bank = S.device || S.local;
+  if (!bank || S.demo) return;
+  const doc = cloud.makeDoc(bank, aliases.presets, aliases.banks);
+  try {
+    await cloud.push(d, doc);
+    setCloud({ ...cloudState(), synced: await cloud.docKey(doc) });
+    toast("Sincronizado con Google Drive", 1800);
+  } catch (e) { quiet ? toast(`Nube: ${e.message}`, 5000) : info("Nube", e.message); }
+}
+
+function loadCloud(r) {
+  pushUndo();
+  S.local = r.bank;
+  aliases = { presets: r.presets, banks: r.banks };
+  saveAliases();
+  render();
+  toast("Presets de la nube cargados. «Guardar» los pasa a la pedalera.", 4500);
+}
+
+async function cloudCheck({ manual = false, afterConnect = false } = {}) {
+  const d = drive();
+  if (!d || !S.local || S.demo) { if (manual && !d) cloudConnect(); return; }
+  let doc;
+  try { doc = await cloud.pull(d); } catch (e) { return manual ? info("Nube", e.message) : toast(`Nube: ${e.message}`, 5000); }
+  if (!doc) { if (afterConnect || manual) cloudPush(!manual); return; }
+  const r = cloud.parseDoc(doc), key = await cloud.docKey(doc);
+  const current = S.device || S.local;
+  const same = toHex(r.bank.toBytes()) === toHex(current.toBytes()) &&
+    JSON.stringify(r.presets) === JSON.stringify(aliases.presets) && JSON.stringify(r.banks) === JSON.stringify(aliases.banks);
+  if (same) { setCloud({ ...cloudState(), synced: key }); if (manual) info("Nube", "La nube y este equipo ya tienen lo mismo."); return; }
+  if (!manual && key === cloudState().synced) return;
+  if (await ask("Nube", `Hay presets en la nube guardados desde ${doc.device || "otro equipo"} (${cloud.when(doc.updated)}).\n` +
+    "¿Cargarlos en el editor? La pedalera no cambia hasta que pulses «Guardar».")) loadCloud(r);
+  setCloud({ ...cloudState(), synced: key });
+}
+
+async function cloudHistory() {
+  const d = drive();
+  if (!d) return cloudConnect();
+  let files;
+  try { files = await cloud.history(d); } catch (e) { return info("Nube", e.message); }
+  if (!files.length) return info("Nube", "Todavía no hay nada guardado en la nube.");
+  modal({ title: "Historial de la nube", step: "Versión para cargar en el editor:", cancel: "Cerrar" });
+  const box = document.createElement("div");
+  box.className = "acts";
+  for (const f of files) {
+    const b = document.createElement("button");
+    b.textContent = (f.name === cloud.LATEST ? "Última · " : "") + cloud.when(f.modifiedTime);
+    b.onclick = async () => {
+      closeModal();
+      try { loadCloud(cloud.parseDoc(await d.read(f.id))); } catch (e) { info("Nube", e.message); }
+    };
+    box.append(b);
+  }
+  $("mBody").append(box);
+  $("mClose").onclick = closeModal;
+}
+
 // command dispatcher: menu sheet, preset long-press menu and toolbar share it --------------------
 
 async function run(cmd) {
   $("menuSheet").hidden = true;
-  const needLocal = !["read", "demo", "about", "view", "port", "update", "calibrate", "backups"].includes(cmd);
+  const needLocal = !["read", "demo", "about", "view", "port", "update", "calibrate", "backups", "cloudConnect", "cloudDisconnect"].includes(cmd);
   if (needLocal && !S.local) return info("Sin datos", "Conecta la pedalera o abre un archivo de banco.");
   const cur = S.current, bankFirst = Math.floor(cur / 4) * 4;
   switch (cmd) {
@@ -1139,6 +1232,16 @@ async function run(cmd) {
       return toast(`Vista ${VIEWS[view]}`);
     case "demo": return startDemo();
     case "update": return checkUpdate(true);
+    case "cloudConnect": return cloudConnect();
+    case "cloudPush": return cloudPush(false);
+    case "cloudPull": return cloudCheck({ manual: true });
+    case "cloudHistory": return cloudHistory();
+    case "cloudDisconnect":
+      if (cloudState().refreshToken && await ask("Nube", "¿Desconectar de Google Drive en este equipo?\nLo guardado en la nube no se borra.")) {
+        setCloud({});
+        toast("Desconectado de Google Drive");
+      }
+      return;
     case "about":
       return info("Tank-G Control Center", `Versión ${appVersion()}\n\nEditor de presets para la M-VAVE Tank-G: la misma app en ` +
         "Windows, Linux y Android, con el protocolo verificado, backup antes de escribir y verificación por relectura.\n\n" +

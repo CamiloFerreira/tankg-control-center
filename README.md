@@ -136,6 +136,10 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
 - Cada subida muestra una ventana de progreso («Subiendo 2 de 4 · 1B»), relee la pedalera
   para verificar y se cierra sola al terminar; si algo falla, el error queda a la vista.
 - «Escucha en vivo»: cada cambio se guarda en la pedalera y se activa el preset para oírlo.
+- **Nube (Google Drive):** menú Nube → «Conectar con Google Drive» (en el PC se abre el navegador;
+  en Android se usa un código que la app copia sola). Desde entonces cada guardado en la pedalera
+  se sube solo, y al abrir la app en otro equipo pregunta si cargar los presets más nuevos. Guarda
+  presets, nombres y un historial de 30 versiones en una carpeta oculta de la app en tu Drive.
 - La conexión y desconexión se detectan solas. La pedalera solo se abre durante cada
   operación, así que no bloquea a PipeWire, a un DAW ni a M-EFCS.
 

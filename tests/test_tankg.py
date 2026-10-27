@@ -541,3 +541,79 @@ def test_bluetooth_midi_ports_are_not_used_for_sysex():
     from tankg import device
     assert device._port_score("TANK-Gv2_BLE:TANK-Gv2_BLE Bluetooth 128:0") == 0
     assert device._port_score("USB Composite Device 28:0") == 2
+
+
+class FakeGoogle:
+    """Google sign-in and a Drive appDataFolder in memory (urllib calls of tankg.cloud)."""
+
+    def __init__(self):
+        self.files: dict[str, dict] = {}
+        self.polls = 0
+        self.next_id = 1
+
+    def __call__(self, method, url, data=None, headers=None, timeout=30):
+        import json as _json
+        import urllib.parse as up
+        from tankg import cloud
+        if url == cloud.TOKEN_URL:
+            form = dict(up.parse_qsl(data.decode()))
+            if form["grant_type"] == "authorization_code":
+                assert form["code"] == "c1" and form["code_verifier"]
+                return 200, b'{"access_token": "a", "refresh_token": "r", "expires_in": 3600}'
+            return 200, b'{"access_token": "a2", "expires_in": 3600}'
+        assert headers["Authorization"].startswith("Bearer ")
+        if method == "GET" and url.startswith(cloud.FILES + "?"):
+            return 200, _json.dumps({"files": [{"id": i, "name": f["name"], "modifiedTime": "t"} for i, f in self.files.items()]}).encode()
+        if method == "GET" and url.endswith("?alt=media"):
+            return 200, self.files[url.split("/")[-1].split("?")[0]]["body"]
+        if method == "POST" and url.startswith(cloud.UPLOAD):
+            parts = data.split(b"\r\n\r\n")
+            meta = _json.loads(parts[1].split(b"\r\n--")[0])
+            body = parts[2].rsplit(b"\r\n--", 1)[0]
+            fid = f"f{self.next_id}"
+            self.next_id += 1
+            self.files[fid] = {"name": meta["name"], "body": body}
+            return 200, _json.dumps({"id": fid}).encode()
+        if method == "PATCH":
+            self.files[url.split("/")[-1].split("?")[0]]["body"] = data
+            return 200, b"{}"
+        if method == "DELETE":
+            del self.files[url.split("/")[-1]]
+            return 204, b""
+        raise AssertionError((method, url))
+
+
+def test_cloud_sign_in_push_pull_history(monkeypatch):
+    from tankg import cloud
+    google = FakeGoogle()
+    monkeypatch.setattr(cloud, "_request", google)
+    monkeypatch.setattr(cloud, "CLIENT_ID", "id")
+    monkeypatch.setattr(cloud, "CLIENT_SECRET", "secret")
+    monkeypatch.setattr(cloud.time, "sleep", lambda s: None)
+    def browser(url):   # the user approves: Google redirects the browser to the loopback address
+        import threading
+        import urllib.parse as up
+        import urllib.request as ur
+        q = dict(up.parse_qsl(up.urlparse(url).query))
+        assert q["scope"] == cloud.SCOPE and q["code_challenge_method"] == "S256"
+        threading.Thread(target=lambda: ur.urlopen(f"{q['redirect_uri']}?code=c1&state={q['state']}", timeout=5).read()).start()
+    token = cloud.sign_in_browser(browser, timeout=10)
+    assert token == "r"
+    drive = cloud.Drive(token)
+    bank = Bank.from_bytes(LIVE)
+    cloud.push(drive, cloud.make_doc(bank, {"1A": "Limpio ñ"}, {"1": "Rock"}, "Linux · pc"))
+    doc = cloud.pull(drive)
+    b2, presets, banks = cloud.parse_doc(doc)
+    assert b2.to_bytes() == LIVE and presets == {"1A": "Limpio ñ"} and banks == {"1": "Rock"} and doc["device"] == "Linux · pc"
+    cloud.push(drive, cloud.make_doc(bank, {"1A": "Limpio ñ"}, {"1": "Rock"}))   # identical: no new version
+    assert len(google.files) == 1
+    for i in range(cloud.HISTORY_KEEP + 3):   # every change keeps the previous one, pruned to HISTORY_KEEP
+        changed = bank.copy()
+        changed.presets[0] = Preset(bytearray([i % 2] * 21))
+        doc = cloud.make_doc(changed, {"1A": f"v{i}"}, {})
+        doc["updated"] = f"2026-10-27T10:{i:02d}:00+00:00"
+        cloud.push(drive, doc)
+    hist = cloud.history(drive)
+    assert hist[0]["name"] == cloud.LATEST
+    assert 1 <= len(hist) - 1 <= cloud.HISTORY_KEEP
+    assert cloud.parse_doc(cloud.pull(drive))[1] == {"1A": f"v{cloud.HISTORY_KEEP + 2}"}
