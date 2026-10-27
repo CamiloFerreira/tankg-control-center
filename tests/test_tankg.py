@@ -544,10 +544,11 @@ def test_bluetooth_midi_ports_are_not_used_for_sysex():
 
 
 class FakeGoogle:
-    """Google sign-in and a Drive appDataFolder in memory (urllib calls of tankg.cloud)."""
+    """Google sign-in and a Drive with the app folder in memory (urllib calls of tankg.cloud)."""
 
     def __init__(self):
         self.files: dict[str, dict] = {}
+        self.folders: dict[str, str] = {}
         self.polls = 0
         self.next_id = 1
 
@@ -555,15 +556,32 @@ class FakeGoogle:
         import json as _json
         import urllib.parse as up
         from tankg import cloud
+        if url == cloud.DEVICE_URL:
+            assert dict(up.parse_qsl(data.decode()))["scope"] == cloud.SCOPE
+            return 200, b'{"device_code": "d", "user_code": "ABCD-EFGH", "verification_url": "https://www.google.com/device", "interval": 1, "expires_in": 60}'
         if url == cloud.TOKEN_URL:
             form = dict(up.parse_qsl(data.decode()))
-            if form["grant_type"] == "authorization_code":
-                assert form["code"] == "c1" and form["code_verifier"]
+            if form["grant_type"].endswith("device_code"):
+                assert form["device_code"] == "d"
+                self.polls += 1
+                if self.polls < 2:   # the user has not allowed it yet
+                    return 428, b'{"error": "authorization_pending"}'
                 return 200, b'{"access_token": "a", "refresh_token": "r", "expires_in": 3600}'
             return 200, b'{"access_token": "a2", "expires_in": 3600}'
         assert headers["Authorization"].startswith("Bearer ")
         if method == "GET" and url.startswith(cloud.FILES + "?"):
-            return 200, _json.dumps({"files": [{"id": i, "name": f["name"], "modifiedTime": "t"} for i, f in self.files.items()]}).encode()
+            q = dict(up.parse_qsl(up.urlparse(url).query))["q"]
+            if cloud.FOLDER_MIME in q:
+                found = [i for i, f in self.folders.items() if f"name = '{f}'" in q]
+            else:
+                found = [i for i, f in self.files.items() if f"'{f['parent']}' in parents" in q]
+            names = {**self.folders, **{i: f["name"] for i, f in self.files.items()}}
+            return 200, _json.dumps({"files": [{"id": i, "name": names[i], "modifiedTime": "t"} for i in found]}).encode()
+        if method == "POST" and url.startswith(cloud.FILES + "?"):
+            meta = _json.loads(data)
+            assert meta["mimeType"] == cloud.FOLDER_MIME
+            self.folders[f"d{len(self.folders) + 1}"] = meta["name"]
+            return 200, _json.dumps({"id": f"d{len(self.folders)}"}).encode()
         if method == "GET" and url.endswith("?alt=media"):
             return 200, self.files[url.split("/")[-1].split("?")[0]]["body"]
         if method == "POST" and url.startswith(cloud.UPLOAD):
@@ -572,7 +590,8 @@ class FakeGoogle:
             body = parts[2].rsplit(b"\r\n--", 1)[0]
             fid = f"f{self.next_id}"
             self.next_id += 1
-            self.files[fid] = {"name": meta["name"], "body": body}
+            assert meta["parents"][0] in self.folders
+            self.files[fid] = {"name": meta["name"], "body": body, "parent": meta["parents"][0]}
             return 200, _json.dumps({"id": fid}).encode()
         if method == "PATCH":
             self.files[url.split("/")[-1].split("?")[0]]["body"] = data
@@ -590,14 +609,12 @@ def test_cloud_sign_in_push_pull_history(monkeypatch):
     monkeypatch.setattr(cloud, "CLIENT_ID", "id")
     monkeypatch.setattr(cloud, "CLIENT_SECRET", "secret")
     monkeypatch.setattr(cloud.time, "sleep", lambda s: None)
-    def browser(url):   # the user approves: Google redirects the browser to the loopback address
-        import threading
-        import urllib.parse as up
-        import urllib.request as ur
-        q = dict(up.parse_qsl(up.urlparse(url).query))
-        assert q["scope"] == cloud.SCOPE and q["code_challenge_method"] == "S256"
-        threading.Thread(target=lambda: ur.urlopen(f"{q['redirect_uri']}?code=c1&state={q['state']}", timeout=5).read()).start()
-    token = cloud.sign_in_browser(browser, timeout=10)
+    code = cloud.start_sign_in()
+    assert code["user_code"] == "ABCD-EFGH" and code["url"] == "https://www.google.com/device"
+    token = cloud.finish_sign_in(code)
+    assert google.polls == 2
+    with pytest.raises(cloud.CloudError):
+        cloud.finish_sign_in(code, should_stop=lambda: True)
     assert token == "r"
     drive = cloud.Drive(token)
     bank = Bank.from_bytes(LIVE)
@@ -606,7 +623,9 @@ def test_cloud_sign_in_push_pull_history(monkeypatch):
     b2, presets, banks = cloud.parse_doc(doc)
     assert b2.to_bytes() == LIVE and presets == {"1A": "Limpio ñ"} and banks == {"1": "Rock"} and doc["device"] == "Linux · pc"
     cloud.push(drive, cloud.make_doc(bank, {"1A": "Limpio ñ"}, {"1": "Rock"}))   # identical: no new version
-    assert len(google.files) == 1
+    assert len(google.files) == 1 and list(google.folders.values()) == [cloud.FOLDER]
+    assert cloud.pull(cloud.Drive(token))["device"] == "Linux · pc"   # a new session finds the existing folder
+    assert len(google.folders) == 1
     for i in range(cloud.HISTORY_KEEP + 3):   # every change keeps the previous one, pruned to HISTORY_KEEP
         changed = bank.copy()
         changed.presets[0] = Preset(bytearray([i % 2] * 21))

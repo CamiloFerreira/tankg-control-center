@@ -16,7 +16,6 @@ sys.path.insert(0, str(ROOT))
 
 from tankg import ai, artists, library  # noqa: E402
 from tankg.model import AMP_MODELS, CAB_MODELS, FIELDS, OFF_COLOR, Preset  # noqa: E402
-from tankg.cloud_config import DEVICE_CLIENT_ID, DEVICE_CLIENT_SECRET  # noqa: E402
 from tankg.version import RELEASES_REPO, __version__  # noqa: E402
 
 OUT = ROOT / "android" / "ui" / "js" / "data.js"
@@ -44,7 +43,6 @@ def render() -> str:
             f"export const BYTE_NAMES = {dump([byte_names.get(i, f'byte {i}') for i in range(21)])};\n"
             f"export const FACTORY = {dump(factory.to_bytes().hex() if factory else None)};\n"
             f"export const AI = {dump(ai_data)};\n"
-            f"export const CLOUD = {dump({'clientId': DEVICE_CLIENT_ID, 'clientSecret': DEVICE_CLIENT_SECRET})};\n"
             f"export const AMP_MODELS = {dump(AMP_MODELS)};\n"
             f"export const CAB_MODELS = {dump(CAB_MODELS)};\n"
             f"export const FIELDS = {dump(fields)};\n"

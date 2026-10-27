@@ -169,6 +169,42 @@ def ask(parent, title: str, text: str) -> bool:
     return box.clickedButton() is yes
 
 
+class CloudSignIn(StyledDialog):
+    """Google sign-in with a code (device flow): copies the code and opens google.com/device.
+    The main window polls Google in the background and closes this window when access is allowed."""
+
+    def __init__(self, main, code: dict):
+        super().__init__(main, "Conectar con Google Drive",
+                         "Tus presets y nombres se guardarán en tu Drive, en la carpeta «Tank-G Control Center».",
+                         width=560, height=380)
+        self.code = code
+        _, lay = self.card("1", "Copia este código")
+        big = QLabel(code["user_code"])
+        big.setObjectName("dlgTitle")
+        big.setStyleSheet("font-size: 34px; letter-spacing: 4px;")
+        big.setAlignment(Qt.AlignCenter)
+        big.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(big)
+        _, lay = self.card("2", "Pégalo en Google y pulsa «Permitir»")
+        hint = QLabel(f"Ya está copiado y se abrió {code['url']} en el navegador.\n"
+                      "Elige tu cuenta, pega el código y acepta: esta ventana se cerrará sola.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        self.body.addStretch()
+        self.button("Cancelar", self.reject)
+        self.button("Copiar código", self.copy)
+        self.button("Abrir Google", self.open_google, "primary")
+        self.copy()
+        self.open_google()
+
+    def copy(self) -> None:
+        QApplication.clipboard().setText(self.code["user_code"])
+
+    def open_google(self) -> None:
+        QDesktopServices.openUrl(QUrl(self.code["url"]))
+
+
 class UploadDialog(StyledDialog):
     """Progress of a write to the pedal: one row per preset, a bar and the current step.
     Closes by itself a moment after a verified write; stays open on errors."""

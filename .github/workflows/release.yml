@@ -34,6 +34,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+      - name: Google Drive OAuth clients
+        env:
+          CLOUD_SECRETS: ${{ secrets.TANKG_CLOUD_SECRETS }}
+        shell: bash
+        run: if [ -n "$CLOUD_SECRETS" ]; then printf '%s' "$CLOUD_SECRETS" > tankg/cloud_secrets.json; fi
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -76,6 +81,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Google Drive OAuth clients
+        env:
+          CLOUD_SECRETS: ${{ secrets.TANKG_CLOUD_SECRETS }}
+        shell: bash
+        run: if [ -n "$CLOUD_SECRETS" ]; then printf '%s' "$CLOUD_SECRETS" > tankg/cloud_secrets.json; fi
       - name: Build and sign the APK
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

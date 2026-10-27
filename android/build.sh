@@ -22,6 +22,15 @@ VCODE=$(( ${MA:-1} * 10000 + ${MI:-0} * 100 + ${PA:-0} ))
 
 cp -r "$HERE/ui" "$OUT/assets/web"
 rm -f "$OUT/assets/web/package.json"
+# Google Drive OAuth client (device flow) from tankg/cloud_secrets.json: built into the APK, never committed
+python3 - "$ROOT/tankg/cloud_secrets.json" "$OUT/assets/web/js/secrets.js" <<'PY'
+import json, sys
+try: doc = json.load(open(sys.argv[1], encoding="utf-8")); dev = doc.get("installed") or doc.get("device") or {}
+except (OSError, ValueError): dev = {}
+if not dev.get("client_id"): print("Sin tankg/cloud_secrets.json: la APK no tendrá sincronización con Google Drive")
+cloud = {"clientId": dev.get("client_id", ""), "clientSecret": dev.get("client_secret", "")}
+open(sys.argv[2], "w", encoding="utf-8").write(f"export const CLOUD = {json.dumps(cloud)};\n")
+PY
 
 DEBUG_FLAG=()
 [ "$MODE" = debug ] && DEBUG_FLAG=(--debug-mode)

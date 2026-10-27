@@ -11,11 +11,20 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
-## Novedades
+## Novedades (1.7)
 
-- **Linux:** el ejecutable ya no se cierra al abrir con «Could not load the Qt platform plugin xcb»
-  (pasaba sin `libxcb-cursor0` instalada o si la sesión fuerza `QT_QPA_PLATFORM=xcb`, como hace
-  Flameshot). Ahora la librería va dentro del ejecutable y, si hiciera falta, usa Wayland.
+- **Nube con Google Drive: los mismos presets en Linux, Windows y Android.**
+  - Menú **Nube → Conectar con Google Drive**: la app copia un código y abre google.com/device;
+    pégalo, elige tu cuenta y pulsa «Permitir». Igual en PC y teléfono.
+  - Cada vez que guardas en la pedalera se sube sola la copia (presets y nombres de presets y bancos).
+  - Al abrir la app en otro equipo, si en la nube hay una versión más nueva, pregunta si cargarla.
+  - **Historial:** se guardan las últimas 30 versiones y puedes volver a cualquiera.
+  - Todo queda en la carpeta «Tank-G Control Center» de **tu** Drive. La app solo ve los archivos que
+    ella misma creó, y cada persona usa su propia cuenta.
+
+## Versión 1.6.2
+
+- **Linux:** el ejecutable ya no se cierra al abrir con «Could not load the Qt platform plugin xcb».
 
 ## Versión 1.6
 

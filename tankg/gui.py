@@ -1321,15 +1321,26 @@ class MainWindow(QMainWindow):
         if not cloud.configured():
             QMessageBox.information(self, "Nube", "Esta versión no tiene configurada la sincronización con Google Drive.")
             return
-        self.statusBar().showMessage("Se abrió Google en el navegador: elige tu cuenta y pulsa «Permitir»…")
+        def show(code: dict) -> None:
+            dlg = dialogs.CloudSignIn(self, code)
+            closed = []
+            dlg.finished.connect(lambda _: closed.append(True))
 
-        def done(token: str) -> None:
-            library.Settings().set_cloud({"refresh_token": token})
-            self.statusBar().showMessage("Conectado con Google Drive: los presets se sincronizan solos.", 8000)
-            self.cloud_check(after_connect=True)
+            def done(token: str) -> None:
+                dlg.accept()
+                library.Settings().set_cloud({"refresh_token": token})
+                self.statusBar().showMessage("Conectado con Google Drive: los presets se sincronizan solos.", 8000)
+                self.cloud_check(after_connect=True)
 
-        self._background(cloud.sign_in_browser, done,
-                         lambda m: (self.statusBar().clearMessage(), QMessageBox.warning(self, "Nube", m)))
+            def failed(message: str) -> None:
+                if not closed:   # cancelled by the user: nothing to say
+                    dlg.reject()
+                    QMessageBox.warning(self, "Nube", message)
+
+            self._background(lambda: cloud.finish_sign_in(code, lambda: bool(closed)), done, failed)
+            dlg.open()
+
+        self._background(cloud.start_sign_in, show, lambda m: QMessageBox.warning(self, "Nube", m))
 
     def cloud_disconnect(self) -> None:
         if library.Settings().cloud and dialogs.ask(self, "Nube", "¿Desconectar de Google Drive en este equipo?\n"

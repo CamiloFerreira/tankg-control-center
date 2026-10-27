@@ -1,12 +1,26 @@
-"""OAuth clients of the Google Cloud project used for Drive sync (scope drive.appdata), created once
-by the author. For installed apps Google does not treat these secrets as confidential: they ship
-inside the executables. Empty values disable the sync.
-
-DESKTOP_*  client type "Desktop app": Windows/Linux sign in with one click (browser + loopback).
-DEVICE_*   client type "TVs and Limited Input devices": Android signs in with a code (device flow);
-           tools/export_ui.py copies these two to the APK.
+"""OAuth client of the Google Cloud project used for Drive sync (scope drive.file), created once by
+the author with type "TVs and Limited Input devices" (device flow, used on every platform).
+It is never committed: tankg/cloud_secrets.json is the JSON downloaded from the Google console
+(git-ignored; bundled by packaging/build.py, injected into the APK by android/build.sh, written by
+the release workflow from the TANKG_CLOUD_SECRETS secret), or TANKG_GOOGLE_CLIENT_ID/SECRET are set.
+Missing values disable the sync. Google does not treat secrets of installed apps as confidential.
 """
-DESKTOP_CLIENT_ID = ""
-DESKTOP_CLIENT_SECRET = ""
-DEVICE_CLIENT_ID = ""
-DEVICE_CLIENT_SECRET = ""
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def _load() -> dict:
+    for base in (Path(getattr(sys, "_MEIPASS", "")) / "tankg", Path(__file__).resolve().parent):
+        try:
+            doc = json.loads((base / "cloud_secrets.json").read_text(encoding="utf-8"))
+            return doc.get("installed") or doc.get("device") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+    return {}
+
+
+_CLIENT = _load()
+CLIENT_ID = os.environ.get("TANKG_GOOGLE_CLIENT_ID") or _CLIENT.get("client_id", "")
+CLIENT_SECRET = os.environ.get("TANKG_GOOGLE_CLIENT_SECRET") or _CLIENT.get("client_secret", "")

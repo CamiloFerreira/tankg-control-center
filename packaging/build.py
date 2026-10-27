@@ -24,6 +24,10 @@ args = [
     "--workpath", str(ROOT / "build"),
     "--specpath", str(ROOT / "build"),
 ]
+if (ROOT / "tankg/cloud_secrets.json").exists():   # Google Drive OAuth clients (gitignored)
+    args += ["--add-data", f"{ROOT / 'tankg/cloud_secrets.json'}{SEP}tankg"]
+else:
+    print("Sin tankg/cloud_secrets.json: el ejecutable no tendrá sincronización con Google Drive")
 args += ["--collect-submodules", "bleak"]   # backends are imported by platform at run time
 if sys.platform.startswith("linux"):
     # Qt >= 6.5 needs libxcb-cursor for X11 and many systems lack it: ship it next to the app.

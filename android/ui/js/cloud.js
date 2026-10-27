@@ -1,11 +1,13 @@
-// Google Drive sync for the APK: same files and format as tankg/cloud.py (appDataFolder:
-// tankg-cloud.json + tankg-history-<stamp>.json, newest 30 kept). Sign-in with Google's device
-// flow (google.com/device + a code): the code is copied and the page opened for the user.
-import { CLOUD } from "./data.js";
+// Google Drive sync for the APK: same files and format as tankg/cloud.py (folder "Tank-G Control
+// Center": tankg-cloud.json + tankg-history-<stamp>.json, newest 30 kept). Sign-in with Google's
+// device flow (google.com/device + a code): the code is copied and the page opened for the user.
+// The OAuth client comes from js/secrets.js, written by android/build.sh (never committed).
 import { Bank, fromHex, toHex } from "./protocol.js";
 
+const CLOUD = await import("./secrets.js").then(m => m.CLOUD || {}, () => ({}));
 const A = globalThis.AndroidMidi;
-const SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+const SCOPE = "https://www.googleapis.com/auth/drive.file";
+const FOLDER = "Tank-G Control Center", FOLDER_MIME = "application/vnd.google-apps.folder";
 const FILES = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
 export const LATEST = "tankg-cloud.json";
@@ -66,7 +68,7 @@ export async function finishSignIn(code, shouldStop = () => false) {
 // Drive --------------------------------------------------------------------------------------
 
 export class Drive {
-  constructor(refreshToken) { this.refresh = refreshToken; this.access = ""; this.expires = 0; }
+  constructor(refreshToken) { this.refresh = refreshToken; this.access = ""; this.expires = 0; this.folderId = ""; }
 
   async token() {
     if (this.access && Date.now() < this.expires - 60000) return this.access;
@@ -88,10 +90,22 @@ export class Drive {
     return r.text;
   }
 
-  async list() {
-    const q = form({ spaces: "appDataFolder", pageSize: 200, fields: "files(id,name,modifiedTime)", orderBy: "name desc" });
-    return json(await this.call("GET", `${FILES}?${q}`)).files || [];
+  async query(q) {
+    const params = form({ q, pageSize: 200, fields: "files(id,name,modifiedTime)", orderBy: "name desc" });
+    return json(await this.call("GET", `${FILES}?${params}`)).files || [];
   }
+
+  /** Id of the app's folder, created on first use. */
+  async folder() {
+    if (!this.folderId) {
+      const found = await this.query(`name = '${FOLDER}' and mimeType = '${FOLDER_MIME}' and trashed = false`);
+      this.folderId = found.length ? found[0].id
+        : json(await this.call("POST", `${FILES}?fields=id`, JSON.stringify({ name: FOLDER, mimeType: FOLDER_MIME }), "application/json")).id;
+    }
+    return this.folderId;
+  }
+
+  async list() { return this.query(`'${await this.folder()}' in parents and trashed = false`); }
 
   async read(id) { return json(await this.call("GET", `${FILES}/${id}?alt=media`)); }
 
@@ -99,7 +113,7 @@ export class Drive {
     const payload = JSON.stringify(doc);
     if (id) { await this.call("PATCH", `${UPLOAD}/${id}?uploadType=media`, payload, "application/json"); return; }
     const b = "tankg-boundary";
-    const body = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, parents: ["appDataFolder"] })}` +
+    const body = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, parents: [await this.folder()] })}` +
       `\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${payload}\r\n--${b}--`;
     await this.call("POST", `${UPLOAD}?uploadType=multipart`, body, `multipart/related; boundary=${b}`);
   }
