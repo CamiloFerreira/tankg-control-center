@@ -26,13 +26,57 @@
   <button id="menuBtn" class="icon" aria-label="Menú">⋮</button>
 </header>
 
-<nav id="menu" class="menu" hidden>
-  <button data-cmd="read">Leer pedalera</button>
-  <button data-cmd="backups">Backups</button>
-  <button data-cmd="view">Vista: automática</button>
-  <button data-cmd="demo">Modo demo (sin pedalera)</button>
-  <button data-cmd="about">Acerca de</button>
-</nav>
+<!-- full menu: same groups as the desktop menu bar -->
+<div id="menuSheet" class="sheet" hidden>
+  <div class="sheet-head"><button class="icon" data-close aria-label="Cerrar">←</button><h2>Menú</h2></div>
+  <div class="sheet-body menu-groups">
+    <section><h3>Pedalera</h3>
+      <button data-cmd="read">Leer presets</button>
+      <button data-cmd="saveAll">Guardar todos los cambios</button>
+      <button data-cmd="saveOne">Guardar este preset</button>
+      <button data-cmd="activate">Activar este preset</button>
+      <button data-cmd="live" class="toggle">Escucha en vivo</button>
+      <button data-cmd="backupNow">Hacer backup ahora</button>
+      <button data-cmd="backups">Gestor de backups</button>
+      <button data-cmd="restoreFile">Restaurar banco desde archivo…</button>
+      <button data-cmd="port">Puerto MIDI…</button>
+      <button data-cmd="calibrate">Asistente de calibración…</button>
+    </section>
+    <section><h3>Editar</h3>
+      <button data-cmd="undo">Deshacer</button>
+      <button data-cmd="copy">Copiar preset</button>
+      <button data-cmd="paste">Pegar preset</button>
+      <button data-cmd="duplicate">Duplicar en otro slot…</button>
+      <button data-cmd="swap">Intercambiar con otro slot…</button>
+      <button data-cmd="left">Mover a la izquierda</button>
+      <button data-cmd="right">Mover a la derecha</button>
+      <button data-cmd="renameBank">Renombrar banco…</button>
+      <button data-cmd="library">Biblioteca de sonidos</button>
+      <button data-cmd="ai">Crear con IA…</button>
+      <button data-cmd="factory">Restaurar este preset de fábrica</button>
+      <button data-cmd="factoryBank">Restaurar banco actual de fábrica</button>
+      <button data-cmd="factoryAll">Restaurar los 36 presets de fábrica</button>
+      <button data-cmd="revert">Revertir este preset</button>
+      <button data-cmd="revertAll">Revertir todo</button>
+    </section>
+    <section><h3>Archivo</h3>
+      <button data-cmd="openBank">Abrir banco (.tgbank)…</button>
+      <button data-cmd="saveBank">Guardar banco como .tgbank</button>
+      <button data-cmd="importPreset">Importar preset (.tgpreset)…</button>
+      <button data-cmd="exportPreset">Exportar preset</button>
+      <button data-cmd="importSet">Importar banco de 4 (.tgset)…</button>
+      <button data-cmd="exportSet">Exportar banco de 4 (.tgset)</button>
+      <button data-cmd="compare">Comparar con archivo de banco…</button>
+    </section>
+    <section><h3>App</h3>
+      <button data-cmd="view">Vista: automática</button>
+      <button data-cmd="demo">Modo demo (sin pedalera)</button>
+      <button data-cmd="update">Buscar actualizaciones</button>
+      <button data-cmd="bytes">Bytes del preset</button>
+      <button data-cmd="about">Acerca de</button>
+    </section>
+  </div>
+</div>
 
 <main id="app">
   <section id="empty" class="empty">
@@ -129,12 +173,77 @@
   </div>
 </div>
 
+<!-- AI -->
+<div id="aiSheet" class="sheet" hidden>
+  <div class="sheet-head"><button class="icon" data-close aria-label="Cerrar">←</button><h2>Crear con IA</h2></div>
+  <div class="sheet-body ai">
+    <div class="seg" id="aiScope"><button data-v="one" class="on">Este preset</button><button data-v="bank">Banco completo (A–D)</button></div>
+    <p class="muted" id="aiTarget"></p>
+    <label class="lbl">Describe el sonido</label>
+    <textarea id="aiText" rows="3" placeholder="Ej.: crunch cálido para riffs de rock clásico, con un poco de reverb"></textarea>
+    <div id="aiChips" class="chips"></div>
+    <label class="lbl">Instrumento</label>
+    <select id="aiInstrument"></select>
+    <div class="seg" id="aiMode"><button data-v="web" class="on">Navegador (gratis, sin clave)</button><button data-v="api">Clave de API</button></div>
+    <div id="aiWeb">
+      <p class="muted">1. Copia las instrucciones y se abre el chat. 2. Pégalas y envía. 3. Copia la respuesta completa y pégala aquí.</p>
+      <div class="row2"><select id="aiSite"></select><button id="aiCopy" class="btn primary">Copiar y abrir chat</button></div>
+      <textarea id="aiAnswer" rows="4" placeholder="Pega aquí la respuesta de la IA"></textarea>
+      <button id="aiRead" class="btn">Leer respuesta</button>
+    </div>
+    <div id="aiApi" hidden>
+      <label class="lbl">Proveedor</label><select id="aiProvider"></select>
+      <label class="lbl">Clave de API</label><input id="aiKey" type="password" autocomplete="off" placeholder="sk-…">
+      <label class="check"><input id="aiRemember" type="checkbox"> Recordar la clave en este dispositivo (sin cifrar)</label>
+      <details><summary>Avanzado</summary>
+        <label class="lbl">Modelo</label><input id="aiModel">
+        <label class="lbl">URL base</label><input id="aiUrl">
+      </details>
+      <button id="aiGen" class="btn primary">✨ Generar</button>
+    </div>
+    <div id="aiResult" class="result" hidden></div>
+    <button id="aiApply" class="btn primary" hidden>Aplicar</button>
+  </div>
+</div>
+
+<!-- calibration -->
+<div id="calSheet" class="sheet" hidden>
+  <div class="sheet-head"><button class="icon" data-close aria-label="Cerrar">←</button><h2>Asistente de calibración</h2></div>
+  <div class="sheet-body">
+    <p class="muted">Confirma en qué byte guarda la pedalera cada perilla: mueves una perilla en la pedalera, guardas y
+      la app muestra qué cambió.</p>
+    <h3 class="step">1 · Tomar referencia</h3>
+    <button id="calRef" class="btn primary">Tomar referencia</button> <span id="calState" class="muted"></span>
+    <h3 class="step">2 · Guardar desde la pedalera</h3>
+    <p class="muted">Entra en modo LIVE (pulsa B+C), mueve <b>una sola</b> perilla y mantén pulsado A, B, C o D hasta
+      que parpadee: así se guarda en ese preset.</p>
+    <h3 class="step">3 · Leer cambios</h3>
+    <button id="calRead" class="btn primary" disabled>Leer cambios</button>
+    <pre id="calLog" class="log">Los cambios detectados aparecerán aquí.</pre>
+  </div>
+</div>
+
+<!-- MIDI port -->
+<div id="portSheet" class="sheet" hidden>
+  <div class="sheet-head"><button class="icon" data-close aria-label="Cerrar">←</button><h2>Puerto MIDI</h2></div>
+  <div class="sheet-body">
+    <p class="muted">Normalmente la app encuentra la Tank-G sola. Si tienes varios dispositivos MIDI conectados, elige cuál es.</p>
+    <div id="portList"></div>
+    <div class="row2"><button id="portTest" class="btn">Probar</button><button id="portSave" class="btn primary">Guardar</button></div>
+    <p id="portState" class="muted"></p>
+  </div>
+</div>
+
+<input id="fileIn" type="file" hidden>
+
 <!-- upload / message dialog -->
 <div id="modal" class="modal" hidden>
   <div class="dialog">
     <h3 id="mTitle"></h3>
     <div id="mBar" class="bar"><div></div></div>
     <p id="mStep"></p>
+    <input id="mInput" class="search" hidden>
+    <div id="mBody"></div>
     <div id="mRows"></div>
     <div class="dialog-actions"><button id="mClose" class="btn">Cerrar</button><button id="mOk" class="btn primary" hidden>Sí</button></div>
   </div>

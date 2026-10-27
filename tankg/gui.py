@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes.util
 import os
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -20,7 +21,8 @@ from PySide6.QtWidgets import (
     QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import dialogs, library, theme
+from . import dialogs, library, theme, updater
+from .version import __version__
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_of
 
@@ -83,6 +85,24 @@ class _Signals(QObject):
     done = Signal(object)
     failed = Signal(str)
     progress = Signal(str, int, int)   # text, step, total (-1, -1 when there is no count)
+
+
+class Background(QRunnable):
+    """Runs fn() in a worker thread without the pedal (update checks and downloads)."""
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+        self.signals = _Signals()
+        self.setAutoDelete(False)
+
+    def run(self) -> None:
+        try:
+            self.signals.done.emit(self.fn())
+        except updater.UpdateError as e:
+            self.signals.failed.emit(str(e))
+        except Exception:  # noqa: BLE001 - surface unexpected errors to the user
+            self.signals.failed.emit(traceback.format_exc())
 
 
 class Job(QRunnable):
@@ -383,6 +403,10 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_device)
         self.timer.start(2000)
+        self._bg: set[Background] = set()
+        settings = library.Settings()
+        if updater.can_self_update() and time.time() - settings.data.get("last_update_check", 0) > 20 * 3600:   # once a day
+            QTimer.singleShot(5000, lambda: self.check_updates(quiet=True))
         self._poll_device()
 
     # layout --------------------------------------------------------------------------
@@ -654,6 +678,7 @@ class MainWindow(QMainWindow):
         m.addAction(a["revert"])
         m.addAction(a["revert_all"])
         m = mb.addMenu("A&yuda")
+        self._action(m, "Buscar actualizaciones", self.check_updates)
         self._action(m, "Bytes del preset", self.show_bytes)
         self._action(m, "Acerca de", self.about)
 
@@ -1269,9 +1294,57 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, f"Bytes de {slot_name(self.current)}",
                                 f"Local:     {p.to_bytes().hex(' ')}\nPedalera: {dev}")
 
+    # updates -------------------------------------------------------------------------
+
+    def _background(self, fn, on_done, on_failed) -> None:
+        task = Background(fn)
+        self._bg.add(task)   # keep the runnable and its signals alive until it reports back
+        task.signals.done.connect(lambda r: (self._bg.discard(task), on_done(r)))
+        task.signals.failed.connect(lambda m: (self._bg.discard(task), on_failed(m)))
+        self.pool.start(task)
+
+    def check_updates(self, quiet: bool = False) -> None:
+        def done(rel: updater.Release) -> None:
+            settings = library.Settings()
+            settings.data["last_update_check"] = time.time()
+            settings.save()
+            if not updater.newer(rel.version):
+                if not quiet:
+                    QMessageBox.information(self, "Actualizaciones", f"Tienes la última versión ({__version__}).")
+                return
+            notes = rel.notes[:900]
+            if not updater.can_self_update():
+                QMessageBox.information(self, f"Versión {rel.version} disponible",
+                                        f"Tienes la {__version__}.\n\n{notes}\n\nEstás usando el código fuente: "
+                                        f"actualiza con «git pull» o descarga la versión en\n{updater.PAGE}")
+                return
+            if dialogs.ask(self, f"Versión {rel.version} disponible",
+                           f"Tienes la {__version__}.\n\n{notes}\n\n¿Descargar e instalar ahora? La app se reiniciará."):
+                self.statusBar().showMessage(f"Descargando la versión {rel.version}…")
+                self._background(lambda: updater.download(rel), installed, failed)
+
+        def installed(data: bytes) -> None:
+            if self.modified_slots() and not dialogs.ask(
+                    self, "Actualizar", "Hay presets modificados sin guardar en la pedalera; se perderán. ¿Reiniciar igualmente?"):
+                return
+            try:
+                updater.install(data)
+            except OSError as e:
+                QMessageBox.critical(self, "Actualizar", f"No se pudo reemplazar el ejecutable: {e}")
+                return
+            QApplication.quit()
+
+        def failed(msg: str) -> None:
+            self.statusBar().clearMessage()
+            if not quiet:
+                QMessageBox.warning(self, "Actualizaciones", msg)
+
+        self._background(updater.latest, done, failed)
+
     def about(self) -> None:
         QMessageBox.about(self, "Tank-G Control Center",
-                          "Gestor de presets para M-VAVE Tank-G en Linux.\n\n"
+                          f"Versión {__version__}\n\n"
+                          "Gestor de presets para M-VAVE Tank-G en Windows, Linux y Android.\n\n"
                           "Protocolo: SysEx de M-EFCS (research/FINDINGS.md).\n"
                           f"Backups automáticos en {library.BACKUP_DIR}")
 

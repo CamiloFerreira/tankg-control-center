@@ -36,6 +36,50 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn.accent { box-shadow: inset 0 0 0 1px var(--accent); color: #bff5dd; }
 .btn.small { padding: 7px 12px; min-height: 36px; font-size: 14px; }
 
+/* menu sheet */
+.menu-groups section { margin-bottom: 14px; }
+.menu-groups h3 { color: var(--dim); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; margin: 10px 4px 6px; }
+.menu-groups button { display: block; width: 100%; text-align: left; background: var(--surface); border: 0;
+  border-bottom: 1px solid var(--border); padding: 13px 14px; }
+.menu-groups button:first-of-type { border-radius: 10px 10px 0 0; }
+.menu-groups button:last-of-type { border-radius: 0 0 10px 10px; border-bottom: 0; }
+.menu-groups button:active { background: var(--teal); }
+.menu-groups button.toggle::after { content: "OFF"; float: right; color: var(--muted); font-weight: 800; font-size: 12px; }
+.menu-groups button.toggle.on::after { content: "ON"; color: var(--ok); }
+.tablet .menu-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0 16px; align-content: start; }
+/* AI, calibration, port */
+.lbl { display: block; color: var(--dim); font-size: 13px; font-weight: 700; margin: 12px 2px 4px; }
+.ai textarea, .ai input, .ai select, #aiSheet details input { width: 100%; background: var(--field); color: #fff;
+  border: 1px solid var(--border2); border-radius: 10px; padding: 10px 12px; font: inherit; }
+.seg { display: flex; margin: 8px 0; }
+.seg button { flex: 1; background: #1a1f25; border: 1px solid var(--border2); padding: 9px 6px; font-weight: 700; color: #cfd6dd; }
+.seg button:first-child { border-radius: 8px 0 0 8px; } .seg button:last-child { border-radius: 0 8px 8px 0; }
+.seg button.on { background: var(--teal); color: #fff; border-color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chips button { background: var(--surface2); border: 1px solid var(--border2); border-radius: 14px; padding: 5px 12px; font-size: 13px; }
+.row2 { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 8px 0; }
+#aiWeb textarea, #aiAnswer { margin: 8px 0; }
+.ai details { margin: 10px 0; color: var(--dim); }
+.ai .btn { width: 100%; margin-top: 8px; }
+.result { background: var(--field); border: 1px dashed var(--border2); border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
+.result b { font-size: 17px; }
+.result p { margin: 6px 0; color: #c8d0d8; }
+.result .res-p { border-left: 5px solid var(--c); padding-left: 8px; margin: 10px 0; }
+.step { font-size: 15px; margin: 18px 0 6px; }
+.log { background: var(--field); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 12px;
+  white-space: pre-wrap; min-height: 140px; color: #c8d0d8; }
+.port { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px; margin-bottom: 6px; }
+.port input { width: 20px; height: 20px; }
+#mBody { margin: 6px 0; max-height: 55vh; overflow-y: auto; }
+#mBody .acts button { display: block; width: 100%; text-align: left; background: var(--surface2); border: 0;
+  border-radius: 8px; padding: 12px; margin-bottom: 6px; }
+#mBody pre { white-space: pre-wrap; font-size: 12px; background: var(--field); border-radius: 8px; padding: 8px; margin: 0; }
+.picker { display: grid; grid-template-columns: auto repeat(4, 1fr); gap: 4px; align-items: center; }
+.picker span { color: var(--dim); font-size: 11px; font-weight: 800; }
+.picker button { background: var(--surface2); border: 2px solid var(--border2); border-radius: 6px; min-height: 38px; font-size: 11px;
+  overflow: hidden; padding: 2px; }
+.picker button:disabled { opacity: .35; }
 .menu { position: fixed; top: 54px; right: 8px; z-index: 20; background: var(--surface);
   border: 1px solid var(--border2); border-radius: 10px; padding: 4px; display: flex; flex-direction: column;
   min-width: 240px; box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }

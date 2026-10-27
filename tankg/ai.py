@@ -32,6 +32,9 @@ PROVIDERS = {
                    "url": "http://localhost:11434/v1", "env": ""},
 }
 
+SUGGESTIONS = ["Crunch tipo AC/DC", "Rítmica de Master of Puppets", "Death sueco con HM-2", "Korn afinado grave",
+               "Solo de Blind Guardian", "Limpio con chorus de los 80", "Blues tipo SRV", "Ambiental para arpegios"]
+
 INSTRUMENTS = [
     "Guitarra eléctrica con humbuckers (tipo Les Paul)",
     "Guitarra eléctrica con bobinas simples (tipo Stratocaster)",

@@ -182,7 +182,15 @@ const score = name => {
 };
 
 /** Opens the pedal with whatever this platform offers: the Android app's native bridge or Web MIDI. */
-export const openMidi = () => (globalThis.AndroidMidi ? openAndroidMidi() : openWebMidi());
+export const openMidi = (port = "") => (globalThis.AndroidMidi ? openAndroidMidi(port) : openWebMidi(port));
+
+/** A port chosen by the user wins (like the desktop "Puerto MIDI…" setting); otherwise best match first. */
+function choose(items, port) {
+  if (!port) return [...items].sort((a, b) => score(b.name) - score(a.name));
+  const hit = items.filter(d => d.name === port);
+  if (!hit.length) throw new DeviceError(`El puerto elegido «${port}» no está conectado. Elige otro en Menú → Puerto MIDI…`);
+  return hit;
+}
 
 /** Object whose onstatechange({port: {state, name}}) fires when MIDI devices come and go. */
 export function midiAccess() {
@@ -207,8 +215,10 @@ function androidOpen(id) {
   });
 }
 
-async function openAndroidMidi() {
-  const devices = JSON.parse(globalThis.AndroidMidi.list()).sort((a, b) => score(b.name) - score(a.name));
+async function openAndroidMidi(port) {
+  const all = JSON.parse(globalThis.AndroidMidi.list());
+  if (!all.length) throw new DeviceError("No se ve ningún dispositivo MIDI. ¿La Tank-G está conectada por USB-OTG y encendida?");
+  const devices = choose(all, port);
   if (!devices.length) throw new DeviceError("No se ve ningún dispositivo MIDI. ¿La Tank-G está conectada por USB-OTG y encendida?");
   let error;
   for (const d of devices) {
@@ -229,7 +239,7 @@ async function openAndroidMidi() {
 }
 
 /** Web MIDI (Chrome on Android over USB-OTG, Chrome/Edge on desktop). */
-export async function openWebMidi() {
+export async function openWebMidi(port = "") {
   if (!navigator.requestMIDIAccess)
     throw new DeviceError("Este navegador no tiene Web MIDI. Usa Chrome en Android (o Chrome/Edge en PC).");
   let access;
@@ -239,7 +249,8 @@ export async function openWebMidi() {
   // Candidates: names that point at the Tank-G first, then generic USB-MIDI, then anything.
   const order = p => -score(p.name);
   const pairs = [];
-  for (const o of [...outs].sort((a, b) => order(a) - order(b))) {
+  if (!outs.length) throw new DeviceError("No se ve ningún dispositivo MIDI. ¿La Tank-G está conectada por USB-OTG y encendida?");
+  for (const o of port ? choose(outs, port) : [...outs].sort((a, b) => order(a) - order(b))) {
     const i = ins.find(i => i.name === o.name) || [...ins].sort((a, b) => order(a) - order(b))[0];
     if (i) pairs.push([i, o]);
   }

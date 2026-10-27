@@ -403,3 +403,34 @@ def test_ai_bank_web_text():
     assert name == "Rock" and len(items) == 4
     with pytest.raises(ai.AIError):
         ai.bank_from_text(_json.dumps({"bank_name": "x", "presets": [DESIGN]}), [None] * 4)
+
+
+def test_updater_versions_and_checksums(monkeypatch):
+    import json as _json
+    from tankg import updater
+    assert updater.newer("1.10.0", "1.9.9") and updater.newer("v2.0.0", "1.99.0")
+    assert not updater.newer("1.5.0", "1.5.0") and not updater.newer("1.4.9", "1.5.0")
+    sums = "abc123  TankG-linux-x86_64\nDEF456  TankG-windows-x64.exe\n"
+    assert updater.expected_sha256(sums, "TankG-windows-x64.exe") == "def456"
+    assert updater.expected_sha256(sums, "otro") is None
+    doc = {"tag_name": "v9.9.9", "body": "Novedades\n## Verificar la descarga\nx",
+           "assets": [{"name": updater.ASSET or "x", "browser_download_url": "https://e/bin"},
+                      {"name": "SHA256SUMS", "browser_download_url": "https://e/sums"}]}
+    payload = b"new binary"
+    import hashlib
+    files = {updater.API: _json.dumps(doc).encode(), "https://e/bin": payload,
+             "https://e/sums": f"{hashlib.sha256(payload).hexdigest()}  {updater.ASSET}\n".encode()}
+    monkeypatch.setattr(updater, "_get", lambda url, timeout=30: files[url])
+    rel = updater.latest()
+    assert rel.version == "9.9.9" and rel.notes == "Novedades" and updater.newer(rel.version)
+    if updater.ASSET:
+        assert updater.download(rel) == payload
+        files["https://e/bin"] = b"tampered"
+        with pytest.raises(updater.UpdateError):
+            updater.download(rel)
+
+
+def test_version_matches_web_and_android():
+    from tankg.version import __version__
+    assert f'export const VERSION = "{__version__}"' in (ROOT / "web/js/data.js").read_text(encoding="utf-8")
+    assert "tankg/version.py" in (ROOT / "android/build.sh").read_text()

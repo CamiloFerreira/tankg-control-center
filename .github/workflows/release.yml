@@ -9,7 +9,18 @@ permissions:
   contents: write
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tag matches tankg/version.py
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          v=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' tankg/version.py)
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != version.py $v"; exit 1; }
+
   build:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -61,6 +72,7 @@ jobs:
           path: ${{ matrix.asset }}
 
   android:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -128,3 +140,12 @@ jobs:
           gh release create "$GITHUB_REF_NAME" assets/* \
             --title "Tank-G Control Center $GITHUB_REF_NAME" \
             --notes-file notes.md
+          cp notes.md "$RUNNER_TEMP/notes.md"
+      - name: Publish to the public releases repo (the apps update from there)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "No RELEASES_TOKEN secret: run tools/publish_release.sh $GITHUB_REF_NAME"; exit 0; fi
+          repo=$(sed -n 's/^RELEASES_REPO = "\(.*\)"/\1/p' tankg/version.py)
+          gh release create "$GITHUB_REF_NAME" assets/* --repo "$repo" \
+            --title "Tank-G Control Center $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

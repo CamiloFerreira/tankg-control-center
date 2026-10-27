@@ -16,8 +16,7 @@ ROOT=$(dirname "$HERE")
 OUT=$HERE/build
 rm -rf "$OUT" && mkdir -p "$OUT/classes" "$OUT/assets" "$ROOT/dist"
 
-VERSION=${TANKG_VERSION:-$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)}
-VERSION=${VERSION:-1.0.0}
+VERSION=${TANKG_VERSION:-$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$ROOT/tankg/version.py")}   # single source
 IFS=. read -r MA MI PA <<<"$VERSION"
 VCODE=$(( ${MA:-1} * 10000 + ${MI:-0} * 100 + ${PA:-0} ))
 

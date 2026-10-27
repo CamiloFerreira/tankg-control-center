@@ -716,8 +716,7 @@ class AIDialog(StyledDialog):
 
     KEY_URLS = {"claude": "https://console.anthropic.com/settings/keys",
                 "openai": "https://platform.openai.com/api-keys"}
-    SUGGESTIONS = ["Crunch tipo AC/DC", "Rítmica de Master of Puppets", "Death sueco con HM-2", "Korn afinado grave",
-                   "Solo de Blind Guardian", "Limpio con chorus de los 80", "Blues tipo SRV", "Ambiental para arpegios"]
+    SUGGESTIONS = ai.SUGGESTIONS
 
     def __init__(self, main):
         super().__init__(main, "✨ Crear preset con IA", "Describe el sonido con tus palabras; la IA ajusta "
