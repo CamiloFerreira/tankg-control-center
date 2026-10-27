@@ -13,21 +13,15 @@ No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
 ## Novedades
 
-- **Android:** la misma pedalera virtual del escritorio (faders, módulos, interruptores A–D que
-  activan el preset), biblioteca, subida con progreso y verificación, backups y modo demo. Vista
-  compacta en teléfono y disposición de escritorio en tablet o pantalla grande.
-- **Biblioteca de sonidos sin IA:** más de 150 bancos y 600 presets. Cada banda trae Limpio (o
-  Crunch), Rítmica, Variante y Solo: heavy, thrash, death, black, power, doom, nu metal, metalcore,
-  progresivo, metal en español, hard rock, alternativo y blues, más bancos para bajo, guitarra
-  clásica (nylon), acústica de acero, Stratocaster y Les Paul.
-- **Subidas más rápidas y visibles:** ventana «Subiendo 2 de 4» con verificación (un preset en
-  ~0,2 s); lo creado con IA o la biblioteca se sube al aplicarlo.
-- **IA más precisa:** el prompt conoce el equipo de cada estilo e instrumento y trae ejemplos
-  calibrados.
-- **Interfaz de escritorio más simple:** seis acciones en la barra, clic derecho en cada preset,
-  doble clic para activarlo.
-- **Correcciones:** deshacer restaura los nombres, la escucha en vivo ya no escribe tras apagarla,
-  la ventana de subida no se puede cerrar a mitad.
+- **Se actualiza sola:** al abrirla, la app avisa si hay una versión nueva y la instala (Windows,
+  Linux y Android; en Android el sistema pide confirmar). Desde esta versión ya no hace falta
+  descargar a mano. Cada descarga se comprueba con `SHA256SUMS`.
+- **Android al nivel del escritorio:** menú completo (Pedalera, Editar, Archivo), pulsación larga en
+  un preset, copiar/pegar/duplicar/intercambiar, nombres de banco, restaurar de fábrica, escucha en
+  vivo, backups, abrir/guardar bancos, importar/exportar presets y bancos (`.tgpreset`, `.tgset`,
+  compatibles con el PC), comparar, puerto MIDI, asistente de calibración y **Crear con IA**.
+- **Corrección:** en Windows los nombres con tildes o «ñ» de los archivos `.tgpreset`/`.tgset` se
+  guardaban con otra codificación; ahora son UTF-8 en todas las plataformas.
 
 ## Verificar la descarga
 
