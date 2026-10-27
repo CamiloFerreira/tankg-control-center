@@ -1,3 +1,7 @@
+---
+title: Política de privacidad
+---
+
 # Política de privacidad — Tank-G Control Center
 
 Última actualización: 27 de octubre de 2026

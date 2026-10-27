@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="{{ site.lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page.title and page.url != "/" %}{{ page.title }} · {% endif %}{{ site.title }}</title>
+  <meta name="description" content="{{ page.description | default: site.description }}">
+  <link rel="icon" href="{{ '/img/logo.png' | relative_url }}">
+  <style>
+    :root { --bg: #11171a; --surface: #1a2226; --border: #2a363c; --text: #e7ecee; --dim: #9fb0b7;
+            --teal: #2bb3a3; --orange: #ff9a1f; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.6;
+           font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    header { border-bottom: 1px solid var(--border); background: var(--surface); }
+    header .in, main, footer { max-width: 860px; margin: 0 auto; padding: 0 16px; }
+    header .in { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex-wrap: wrap; }
+    header a.brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700;
+                     text-decoration: none; margin-right: auto; }
+    header img { width: 36px; height: 36px; }
+    header nav a { color: var(--dim); margin-left: 14px; text-decoration: none; }
+    header nav a:hover { color: var(--text); }
+    main { padding-top: 24px; padding-bottom: 48px; }
+    a { color: var(--teal); }
+    h1, h2, h3 { line-height: 1.25; }
+    h2 { margin-top: 2em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+    code { background: var(--surface); padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 2.5em 0; }
+    img { max-width: 100%; }
+    .hero { text-align: center; padding: 24px 0 8px; }
+    .hero img.logo { width: 128px; height: 128px; }
+    .hero p { color: var(--dim); font-size: 1.1em; }
+    .btn { display: inline-block; margin: 6px; padding: 10px 18px; border-radius: 10px; text-decoration: none;
+           font-weight: 600; background: var(--teal); color: #071312; }
+    .btn.alt { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .shots { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 24px 0; }
+    .shots img { border-radius: 10px; border: 1px solid var(--border); }
+    footer { color: var(--dim); font-size: .9em; padding-bottom: 32px; }
+  </style>
+</head>
+<body>
+  <header><div class="in">
+    <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/img/logo.png' | relative_url }}" alt="">{{ site.title }}</a>
+    <nav>
+      <a href="{{ '/PRIVACY.html' | relative_url }}">Privacidad</a>
+      <a href="{{ '/TERMS.html' | relative_url }}">Condiciones</a>
+      <a href="https://github.com/CamiloFerreira/tankg-control-center">Código</a>
+    </nav>
+  </div></header>
+  <main>
+{{ content }}
+  </main>
+  <footer>
+    <p>Tank-G Control Center es un proyecto independiente y de código abierto; no está afiliado a M-VAVE.
+      · <a href="{{ '/PRIVACY.html' | relative_url }}">Política de privacidad</a>
+      · <a href="{{ '/TERMS.html' | relative_url }}">Condiciones del servicio</a></p>
+  </footer>
+</body>
+</html>

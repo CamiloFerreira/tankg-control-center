@@ -1,0 +1,12 @@
+# GitHub Pages site (https://camiloferreira.github.io/tankg-control-center/): home page, privacy
+# policy and terms of service of the app, which Google's OAuth consent screen links to.
+title: Tank-G Control Center
+description: Editor de presets para la pedalera M-VAVE Tank-G en Linux, Windows y Android.
+lang: es
+defaults:
+  - scope: { path: "" }
+    values: { layout: default }
+plugins:
+  - jekyll-relative-links
+  - jekyll-optional-front-matter
+relative_links: { enabled: true }

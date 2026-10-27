@@ -1,3 +1,7 @@
+---
+title: Condiciones del servicio
+---
+
 # Condiciones del servicio — Tank-G Control Center
 
 Última actualización: 27 de octubre de 2026
