@@ -37,17 +37,45 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn.accent { box-shadow: inset 0 0 0 1px var(--accent); color: #bff5dd; }
 .btn.small { padding: 7px 12px; min-height: 36px; font-size: 14px; }
 
-/* menu sheet */
-.menu-groups section { margin-bottom: 14px; }
-.menu-groups h3 { color: var(--dim); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; margin: 10px 4px 6px; }
-.menu-groups button { display: block; width: 100%; text-align: left; background: var(--surface); border: 0;
-  border-bottom: 1px solid var(--border); padding: 13px 14px; }
-.menu-groups button:first-of-type { border-radius: 10px 10px 0 0; }
-.menu-groups button:last-of-type { border-radius: 0 0 10px 10px; border-bottom: 0; }
-.menu-groups button:active { background: var(--teal); }
-.menu-groups button.toggle::after { content: "OFF"; float: right; color: var(--muted); font-weight: 800; font-size: 12px; }
-.menu-groups button.toggle.on::after { content: "ON"; color: var(--ok); }
-.tablet .menu-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0 16px; align-content: start; }
+/* menu: search, quick actions and grouped commands; a side panel on tablets */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.ic { width: 20px; height: 20px; flex: none; }
+.menu-search { display: flex; align-items: center; gap: 8px; margin: 10px 12px 2px; padding: 0 12px; border-radius: 12px;
+  background: var(--field); border: 1px solid var(--border2); color: var(--dim); }
+.menu-search:focus-within { border-color: var(--accent); }
+.menu-search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text); font: inherit;
+  padding: 12px 0; }
+.menu-groups .quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 6px; }
+.menu-groups .quick button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-height: 72px; padding: 10px 4px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+  font-size: 13px; font-weight: 600; text-align: center; }
+.menu-groups .quick .ic { width: 24px; height: 24px; color: #8fe0be; }
+.menu-groups .quick button.on { border-color: var(--accent); background: #12402c; }
+.menu-groups section { margin-top: 14px; }
+.menu-groups h3 { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; font-weight: 800;
+  letter-spacing: 1px; text-transform: uppercase; margin: 0 4px 6px; }
+.menu-groups h3 .ic { width: 16px; height: 16px; }
+.menu-groups .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.menu-groups .card button { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; background: none;
+  border: 0; border-top: 1px solid var(--border); padding: 11px 14px; min-height: 56px; }
+.menu-groups .card button:first-child, .menu-groups .card button.nomatch + button { border-top: 0; }
+.menu-groups .card .ic { color: #8fe0be; }
+.menu-groups .card span { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.menu-groups .card b { font-weight: 600; }
+.menu-groups .card small { color: var(--dim); font-size: 12px; line-height: 1.3; }
+.menu-groups button:not(:disabled):active { background: var(--teal); }
+.menu-groups button:disabled { opacity: .38; cursor: default; }
+.menu-groups .nomatch { display: none !important; }
+.menu-groups .state::after { content: "OFF"; font-style: normal; font-size: 11px; font-weight: 800; color: var(--muted);
+  border: 1px solid var(--border2); border-radius: 999px; padding: 2px 8px; }
+.menu-groups .on .state::after { content: "ON"; color: var(--ok); border-color: var(--accent); }
+#menuEmpty { text-align: center; margin: 32px 0; }
+.menu-shade { display: none; }
+/* tablets: a side panel over the editor, closed by tapping outside */
+.tablet .menu-sheet { left: auto; width: min(440px, 92vw); border-left: 1px solid var(--border2);
+  box-shadow: -16px 0 40px rgba(0, 0, 0, .5); }
+.tablet .menu-sheet:not([hidden]) ~ .menu-shade { display: block; position: fixed; inset: 0; z-index: 9;
+  background: rgba(0, 0, 0, .45); }
 /* AI, calibration, port */
 .lbl { display: block; color: var(--dim); font-size: 13px; font-weight: 700; margin: 12px 2px 4px; }
 .ai textarea, .ai input, .ai select, #aiSheet details input { width: 100%; background: var(--field); color: #fff;

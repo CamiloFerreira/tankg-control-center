@@ -7,15 +7,16 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QByteArray, QObject, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
     QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import ai, artists, chatapps, device, library
+from . import ai, artists, chatapps, device, library, menu
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, FIELDS, OFF_COLOR, REC_LEN, Bank, slot_name, zone_of
 from .theme import ERROR, OK, TEXT, TEXT_DIM
 
@@ -167,6 +168,169 @@ def ask(parent, title: str, text: str) -> bool:
     box.setDefaultButton(yes)
     box.exec()
     return box.clickedButton() is yes
+
+
+def menu_icon(name: str, color: str = "#8fe0be", size: int = 20) -> QPixmap:
+    """A line icon of menu.ICONS drawn in `color` (sharp on high-DPI screens)."""
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" '
+           f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{menu.ICONS[name]}</svg>')
+    scale = 3
+    pix = QPixmap(size * scale, size * scale)
+    pix.fill(Qt.transparent)
+    painter = QPainter(pix)
+    QSvgRenderer(QByteArray(svg.encode())).render(painter, QRectF(0, 0, size * scale, size * scale))
+    painter.end()
+    pix.setDevicePixelRatio(scale)
+    return pix
+
+
+class CommandMenu(StyledDialog):
+    """Every command of the app, searchable, like the APK menu (same groups, texts and icons from
+    tankg/menu.py): quick actions on top, then the groups. Type to filter, Enter runs the first
+    match. Commands that can't run now are dimmed (MainWindow.command_state)."""
+
+    def __init__(self, main):
+        super().__init__(main, "Menú", "Busca una acción o elige un grupo. Atajo: Ctrl+Shift+P.", 620, 760)
+        self.search = QLineEdit()
+        self.search.setObjectName("menuSearch")
+        self.search.setPlaceholderText("Buscar: guardar, nube, fábrica, AMP…")
+        self.search.addAction(QIcon(menu_icon("search", "#8a96a3")), QLineEdit.LeadingPosition)
+        self.search.textChanged.connect(self._filter)
+        self.search.returnPressed.connect(self._run_first)
+        self.body.addWidget(self.search)
+        state = main.command_state()
+        labels = {cmd: (label, icon) for _, cmd, label, _, icon, _ in menu.items()}
+        self.quick = QWidget()
+        grid = QHBoxLayout(self.quick)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(8)
+        for cmd in menu.QUICK:
+            b = QToolButton()
+            b.setObjectName("quickTile")
+            b.setText(menu.QUICK_LABEL[cmd])
+            b.setIcon(QIcon(menu_icon(labels[cmd][1], size=24)))
+            b.setIconSize(QSize(24, 24))
+            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.setMinimumHeight(70)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setEnabled(bool(state.get(cmd, True)))
+            if cmd == "live":
+                b.setCheckable(True)
+                b.setChecked(main.live_action.isChecked())
+            b.clicked.connect(lambda _=False, c=cmd: self._run(c))
+            grid.addWidget(b)
+        self.body.addWidget(self.quick)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        inner = QWidget()
+        inner.setObjectName("body")
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 4, 0)
+        lay.setSpacing(6)
+        self.groups: list[tuple[QWidget, list]] = []
+        self.rows: list[tuple[QPushButton, str, str]] = []
+        for title, icon, _ in menu.MENU:
+            entries = [i for i in menu.items() if i[0] == title]
+            if not entries:
+                continue
+            box = QWidget()
+            v = QVBoxLayout(box)
+            v.setContentsMargins(0, 8, 0, 0)
+            v.setSpacing(6)
+            head = QHBoxLayout()
+            pic = QLabel()
+            pic.setPixmap(menu_icon(icon, "#8a96a3", 15))
+            name = QLabel(title.upper())
+            name.setObjectName("menuGroup")
+            head.addWidget(pic)
+            head.addWidget(name, 1)
+            v.addLayout(head)
+            card = QFrame()
+            card.setObjectName("card")
+            c = QVBoxLayout(card)
+            c.setContentsMargins(0, 0, 0, 0)
+            c.setSpacing(0)
+            rows = []
+            for _, cmd, label, desc, ic, find in entries:
+                row = self._row(cmd, label, desc, ic, bool(state.get(cmd, True)), cmd == "live" and main.live_action.isChecked())
+                row.setProperty("find", find)
+                row.setProperty("available", not (cmd in state and state[cmd] is None))   # None: doesn't apply now
+                row.setHidden(not row.property("available"))
+                c.addWidget(row)
+                rows.append(row)
+                self.rows.append((row, cmd, find))
+            v.addWidget(card)
+            lay.addWidget(box)
+            self.groups.append((box, rows))
+        self.empty = QLabel("Nada coincide. Prueba con otra palabra.")
+        self.empty.setObjectName("hint")
+        self.empty.setAlignment(Qt.AlignCenter)
+        self.empty.hide()
+        lay.addWidget(self.empty)
+        lay.addStretch()
+        scroll.setWidget(inner)
+        self.body.addWidget(scroll, 1)
+        self.button("Cerrar", self.reject)
+        self.search.setFocus()
+
+    def _row(self, cmd: str, label: str, desc: str, icon: str, enabled: bool, on: bool) -> QPushButton:
+        b = QPushButton()
+        b.setObjectName("menuItem")
+        b.setCursor(Qt.PointingHandCursor)
+        b.setMinimumHeight(56)
+        h = QHBoxLayout(b)
+        h.setContentsMargins(14, 8, 14, 8)
+        h.setSpacing(14)
+        pic = QLabel()
+        pic.setPixmap(menu_icon(icon))
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        title = QLabel(label)
+        title.setObjectName("menuTitle")
+        sub = QLabel(desc)
+        sub.setObjectName("menuDesc")
+        text.addWidget(title)
+        text.addWidget(sub)
+        h.addWidget(pic)
+        h.addLayout(text, 1)
+        if cmd == "live":
+            st = QLabel("ON" if on else "OFF")
+            st.setObjectName("menuState")
+            st.setProperty("on", on)
+            h.addWidget(st)
+        for w in (pic, title, sub):
+            w.setAttribute(Qt.WA_TransparentForMouseEvents)
+        b.setEnabled(enabled)
+        if not enabled:
+            pic.setPixmap(menu_icon(icon, "#4a5560"))
+        b.clicked.connect(lambda: self._run(cmd))
+        return b
+
+    def _filter(self, text: str) -> None:
+        q = text.strip()
+        self.quick.setHidden(bool(q))
+        shown_any = False
+        for box, rows in self.groups:
+            shown = 0
+            for row in rows:
+                visible = bool(row.property("available")) and menu.matches(q, row.property("find"))
+                row.setVisible(visible)
+                shown += visible
+            box.setVisible(shown > 0)
+            shown_any = shown_any or shown > 0
+        self.empty.setVisible(not shown_any)
+
+    def _run_first(self) -> None:
+        for row, cmd, _ in self.rows:
+            if row.isVisible() and row.isEnabled():
+                self._run(cmd)
+                return
+
+    def _run(self, cmd: str) -> None:
+        self.accept()
+        QTimer.singleShot(0, lambda: self.main.run_command(cmd))
 
 
 class CloudSignIn(StyledDialog):

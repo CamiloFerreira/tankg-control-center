@@ -2,7 +2,8 @@
 // `device` = last bank read from the pedal, `local` = working copy; "modified" = slots that
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
-import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FACTORY_SETS, FIELDS, LEGAL, LIBRARY, RELEASES_REPO, VERSION } from "./data.js";
+import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FACTORY_SETS, FIELDS, ICONS, LEGAL, LIBRARY, MENU, QUICK, QUICK_LABEL,
+  RELEASES_REPO, VERSION } from "./data.js";
 import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 import { fromText as aiFromText, generate as generateAI, webPrompt, zoneGap } from "./ai.js";
 import { parseBankFile, parsePresetFile, parseSetFile, presetFile, setFile, stamp } from "./files.js";
@@ -266,7 +267,8 @@ function applyView() {
   const tablet = view === "tablet" || (view === "auto" && wide.matches);
   document.body.classList.toggle("tablet", tablet);
   if (tablet) closeBrowser();
-  document.querySelector('[data-cmd="view"]').textContent = `Vista: ${VIEWS[view]}`;
+  const viewItem = document.querySelector('#menuBody [data-cmd="view"] b');
+  if (viewItem) viewItem.textContent = `Vista: ${VIEWS[view]}`;
   if (tablet && !$("libSheet").hidden && S.libBank) $("libList").hidden = false;
 }
 wide.addEventListener?.("change", applyView);
@@ -935,7 +937,7 @@ async function toggleLive() {
   if (!S.live && !(await ask("Escucha en vivo", "Cada cambio se guardará en la memoria de la pedalera y se activará el preset " +
     "para que lo oigas al momento.\nAntes del primer cambio se hace un backup automático.\n\n¿Activar?"))) return;
   S.live = !S.live;
-  document.querySelector('[data-cmd="live"]').classList.toggle("on", S.live);
+  for (const b of document.querySelectorAll('#menuBody [data-cmd="live"]')) b.classList.toggle("on", S.live);
   toast(S.live ? "Escucha en vivo activada" : "Escucha en vivo desactivada");
   if (S.live) scheduleLive(); else clearTimeout(liveTimer);
 }
@@ -1305,6 +1307,72 @@ async function cloudHistory() {
   $("mClose").onclick = closeModal;
 }
 
+// menu: grouped commands with icons, a short description and a search box (same commands as the
+// desktop menu bar). Unavailable commands are dimmed; the cloud group shows what applies. -------
+
+const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const icon = name => `<svg class="ic" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+function renderMenu() {
+  // the icons (tankg/menu.py) as an SVG sprite, shared by every menu entry
+  document.body.insertAdjacentHTML("afterbegin", '<svg class="sprite" aria-hidden="true">' + Object.entries(ICONS).map(([k, v]) =>
+    `<symbol id="i-${k}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${v}</symbol>`).join("") + "</svg>");
+  const items = Object.fromEntries(MENU.flatMap(([, , list]) => list.map(i => [i[0], i])));
+  let html = `<div class="quick">${QUICK.map(c => `<button data-cmd="${c}">${icon(items[c][3])}<span>${QUICK_LABEL[c]}</span></button>`).join("")}</div>`;
+  for (const [title, ic, list] of MENU)
+    html += `<section><h3>${icon(ic)}${title}</h3><div class="card">` + list.map(([cmd, label, desc, i, keys = ""]) =>
+      `<button data-cmd="${cmd}" data-find="${fold(`${title} ${label} ${desc} ${keys}`)}">${icon(i)}<span><b>${label}</b><small>${desc}</small></span>`
+      + (cmd === "live" ? '<i class="state"></i>' : "") + "</button>").join("") + "</div></section>";
+  $("menuBody").innerHTML = html + '<p id="menuEmpty" class="muted" hidden>Nada coincide. Prueba con otra palabra.</p>';
+}
+
+/** Dims what can't be used right now and shows only the cloud actions that apply. */
+function menuState() {
+  const has = !!S.local, dev = !!S.dev, n = has && S.device ? modified().length : 0;
+  const curMod = has && modified().includes(S.current), cloudOn = !!cloudState().refreshToken;
+  const off = { saveAll: !dev || !n, saveOne: !dev || !curMod, activate: !dev, live: !dev, undo: !S.undo.length,
+    paste: !S.clipboard, revert: !curMod, revertAll: !n, backupNow: !dev, restoreFile: !dev, ampUpload: !dev, factoryAmpCab: !dev,
+    cloudPush: !has, cloudPull: !has };
+  for (const c of ["copy", "duplicate", "swap", "left", "right", "renameBank", "library", "ai", "factory", "factoryBank", "factoryAll",
+    "saveBank", "importPreset", "exportPreset", "importSet", "exportSet", "compare", "bytes"]) off[c] = off[c] || !has;
+  for (const b of $("menuBody").querySelectorAll("[data-cmd]")) {
+    const c = b.dataset.cmd;
+    b.disabled = !!off[c];
+    if (c.startsWith("cloud")) b.hidden = (c === "cloudConnect") === cloudOn;
+  }
+  for (const b of $("menuBody").querySelectorAll('[data-cmd="live"]')) b.classList.toggle("on", S.live);
+  const read = $("menuBody").querySelector('.card [data-cmd="read"]');   // without a pedal, «Leer» connects
+  read.querySelector("b").textContent = dev ? "Leer presets" : "Conectar y leer";
+  read.querySelector("small").textContent = dev ? "Trae los 36 presets de la pedalera" : "USB-OTG o Bluetooth (Tank-G v2)";
+}
+
+function filterMenu() {
+  const q = fold($("menuSearch").value.trim());
+  const body = $("menuBody");
+  body.querySelector(".quick").hidden = !!q;
+  let any = false;
+  for (const sec of body.querySelectorAll("section")) {
+    let shown = 0;
+    for (const b of sec.querySelectorAll("[data-find]")) {
+      const match = !q || q.split(/\s+/).every(w => b.dataset.find.includes(w));
+      b.classList.toggle("nomatch", !match);
+      if (match && !b.hidden) shown++;
+    }
+    sec.hidden = !shown;
+    any = any || shown > 0;
+  }
+  $("menuEmpty").hidden = any;
+}
+
+function openMenu() {
+  menuState();
+  $("menuSearch").value = "";
+  filterMenu();
+  $("menuBody").scrollTop = 0;
+  $("menuSheet").hidden = false;
+  if (document.body.classList.contains("tablet")) $("menuSearch").focus();   // phones: no keyboard popping up
+}
+
 // command dispatcher: menu sheet, preset long-press menu and toolbar share it --------------------
 
 async function run(cmd) {
@@ -1456,8 +1524,10 @@ async function run(cmd) {
 function wire() {
   $("connect").onclick = $("connectBig").onclick = () => connect();
   $("demoBig").onclick = startDemo;
-  $("menuBtn").onclick = () => { document.querySelector('[data-cmd="live"]').classList.toggle("on", S.live); $("menuSheet").hidden = false; };
-  $("menuSheet").onclick = e => { const cmd = e.target.closest("[data-cmd]")?.dataset.cmd; if (cmd) run(cmd); };
+  $("menuBtn").onclick = openMenu;
+  $("menuSheet").onclick = e => { const b = e.target.closest("[data-cmd]"); if (b && !b.disabled) run(b.dataset.cmd); };
+  $("menuSearch").oninput = filterMenu;
+  $("menuShade").onclick = () => { $("menuSheet").hidden = true; };
   $("bankTag").onclick = () => run("renameBank");
   // long press on a footswitch or a preset of the list: per-preset menu (desktop right click)
   document.addEventListener("contextmenu", e => {
@@ -1561,17 +1631,18 @@ function wire() {
     if (!(await ask("Cargar banco", `Se reemplazarán los 4 presets del banco ${dest + 1} por «${S.libBank.name}».\n¿Continuar?`))) return;
     applyPresets(dest * 4, S.libBank.presets.map(p => ({ bytes: fromHex(p.hex), name: p.name })), S.libBank.name);
   };
-  // Android back button: close the sheet instead of leaving the app
-  history.replaceState({ root: true }, "");
-  window.addEventListener("popstate", () => {
-    const open = [...document.querySelectorAll(".sheet")].find(s => !s.hidden);
-    if (open) { open.hidden = true; history.pushState({}, ""); }
-    else if (document.body.classList.contains("browsing")) { closeBrowser(); history.pushState({}, ""); }
-  });
-  history.pushState({}, "");
+  // Android back button (MainActivity asks before leaving the app): close what is open, topmost first
+  window.__back = () => {
+    if (!$("modal").hidden) { if (!$("mClose").disabled) $("mClose").click(); return true; }   // busy dialogs stay
+    const open = [...document.querySelectorAll(".sheet")].reverse().find(s => !s.hidden);
+    if (open) { (open.querySelector("[data-close]") || { click: () => { open.hidden = true; } }).click(); return true; }
+    if (document.body.classList.contains("browsing")) { closeBrowser(); return true; }
+    return false;
+  };
 }
 
 buildModules();
+renderMenu();
 wire();
 loadAliases();
 applyView();

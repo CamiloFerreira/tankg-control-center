@@ -236,3 +236,25 @@ def test_amp_cab_windows_close_after_bluetooth_not_found(env, which):
     assert "Bluetooth" in d.step.text() and not messages
     d.reject()
     assert not d.isVisible()
+
+
+def test_command_menu_covers_every_command_and_searches(env):
+    from tankg import menu
+    w, *_ = env
+    actions = w.command_actions()
+    assert {cmd for _, cmd, *_ in menu.items()} == set(actions)   # every desktop entry runs something
+    assert {"view", "demo"} == {cmd for _, entries in [(g[0], g[2]) for g in menu.MENU] for cmd, *_ in entries} - set(actions)
+    ran = []
+    with mock.patch.object(w, "command_actions", lambda: {c: (lambda c=c: ran.append(c)) for c in actions}):
+        d = dialogs.CommandMenu(w)
+        d.show()
+        d.search.setText("fabrica amp")   # accents are ignored, every word must match
+        visible = [c for row, c, _ in d.rows if row.isVisible()]
+        assert visible == ["ampUpload", "factoryAmpCab"] and d.quick.isHidden()
+        d.search.returnPressed.emit()
+        _, _, wait, _ = env
+        assert wait(lambda: ran == ["ampUpload"]) and not d.isVisible()
+    d = dialogs.CommandMenu(w)
+    rows = {c: row for row, c, _ in d.rows}
+    assert not rows["paste"].isEnabled()                                         # nothing copied yet
+    assert rows["cloudConnect"].property("available") and not rows["cloudPush"].property("available")

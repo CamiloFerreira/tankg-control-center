@@ -44,7 +44,7 @@ Layers, bottom-up (all in `tankg/`):
 
 Windows/Linux (`tankg/`, PySide6) and Android (`android/`) are the same product. **Every user-facing change goes to both in the same commit**; nothing is "desktop only" unless it cannot exist on the other side (CLI, live MIDI port names on Windows). Checklist for any change:
 
-1. Shared data lives in Python and is generated for the APK: version (`tankg/version.py`), field map, model names, band library (`tankg/artists.py`), factory bank, AI prompt/schemas/suggestions (`tankg/ai.py`). After touching any of them run `.venv/bin/python tools/export_ui.py` (`tests/test_ui.py` fails while `android/ui/js/data.js` is stale).
+1. Shared data lives in Python and is generated for the APK: version (`tankg/version.py`), field map, model names, band library (`tankg/artists.py`), factory bank, AI prompt/schemas/suggestions (`tankg/ai.py`), the command menu (groups, texts, icons: `tankg/menu.py`). After touching any of them run `.venv/bin/python tools/export_ui.py` (`tests/test_ui.py` fails while `android/ui/js/data.js` is stale).
 2. Logic that exists twice must behave identically and is tested against each other: SysEx/`TankG` and Bluetooth/`TankGBle` (`protocol.js` vs `sysex.py`/`bleproto.py`/`device.py`, golden frames captured from the pedal and the official app), `apply_design`/browser prompt/answer parsing (`ai.js` vs `ai.py`), `.tgbank/.tgpreset/.tgset` (`files.js` vs `library.py`, files written by one are loaded by the other in `test_ui_ai_and_files_match_python`).
 3. UI features: desktop menu/toolbar/right-click ↔ APK menu sheet (`run(cmd)` in `app.js`), long-press preset menu, `dialogs.*` ↔ sheets in `index.html`. The table below must stay complete.
 4. Run `pytest` (desktop + JS through node), build `android/build.sh debug` and try it on a phone when the change touches the UI or the pedal.
@@ -52,6 +52,7 @@ Windows/Linux (`tankg/`, PySide6) and Android (`android/`) are the same product.
 
 | Feature | Desktop | Android |
 |---|---|---|
+| Command menu with search (every action, `tankg/menu.py`) | toolbar «☰ Menú», Ctrl+Shift+P (`dialogs.CommandMenu`) | ⋮ menu (sheet; side panel on tablets) |
 | Read / save all / save one / activate | toolbar, Pedalera menu | toolbar (tablet), bottom bar, menu, footswitches |
 | Live audition | toolbar toggle | menu → Escucha en vivo |
 | Backups (auto, manual, manager, restore file) | Pedalera menu, `BackupManager` | menu → backups sheet, download `.tgbank` |

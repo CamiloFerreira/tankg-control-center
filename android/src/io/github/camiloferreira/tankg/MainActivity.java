@@ -139,8 +139,12 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (web.canGoBack()) web.goBack();   // the page uses history to close its sheets
-        else super.onBackPressed();
+        // The page closes its own dialog, sheet or preset list (window.__back() returns true); only
+        // when nothing is open does back leave the app. Not history: WebView skips entries pushed
+        // without a user gesture, so back used to close the app instead of the menu.
+        web.evaluateJavascript("window.__back ? window.__back() : false", handled -> {
+            if (!"true".equals(handled)) super.onBackPressed();
+        });
     }
 
     @Override

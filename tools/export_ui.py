@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tankg import ai, artists, library  # noqa: E402
+from tankg import ai, artists, library, menu  # noqa: E402
 from tankg.model import AMP_MODELS, CAB_MODELS, FIELDS, OFF_COLOR, Preset  # noqa: E402
 from tankg.version import PRIVACY_URL, RELEASES_REPO, TERMS_URL, __version__  # noqa: E402
 
@@ -44,6 +44,10 @@ def render() -> str:
             f"export const BYTE_NAMES = {dump([byte_names.get(i, f'byte {i}') for i in range(21)])};\n"
             f"export const FACTORY = {dump(factory)};   // factory presets of each set (AM4, AM3)\n"
             f"export const FACTORY_SETS = {dump(library.FACTORY_SETS)};\n"
+            f"export const MENU = {dump(menu.MENU)};\n"
+            f"export const QUICK = {dump(menu.QUICK)};\n"
+            f"export const QUICK_LABEL = {dump(menu.QUICK_LABEL)};\n"
+            f"export const ICONS = {dump(menu.ICONS)};\n"
             f"export const AI = {dump(ai_data)};\n"
             f"export const AMP_MODELS = {dump(AMP_MODELS)};\n"
             f"export const CAB_MODELS = {dump(CAB_MODELS)};\n"

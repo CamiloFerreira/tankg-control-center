@@ -130,6 +130,25 @@ QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 
 /* message boxes and input dialogs */
+/* command menu (dialogs.CommandMenu): search, quick tiles, grouped commands */
+QLineEdit#menuSearch {{ font-size: 15px; padding: 10px 12px; border-radius: 10px; }}
+QToolButton#quickTile {{ background: {SURFACE}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 12px;
+    padding: 10px 6px; font-weight: bold; }}
+QToolButton#quickTile:hover {{ border-color: {ACCENT}; }}
+QToolButton#quickTile:checked {{ background: #12402c; border-color: {ACCENT}; }}
+QToolButton#quickTile:disabled {{ color: {TEXT_MUTED}; }}
+QLabel#menuGroup {{ color: {TEXT_DIM}; font-size: 11px; font-weight: bold; letter-spacing: 1px; }}
+QPushButton#menuItem {{ background: transparent; border: none; border-top: 1px solid {BORDER}; border-radius: 0;
+    text-align: left; padding: 0; }}
+QPushButton#menuItem:hover {{ background: #232a31; }}
+QPushButton#menuItem:focus {{ background: #232a31; outline: none; }}
+QLabel#menuTitle {{ font-weight: bold; }}
+QLabel#menuDesc {{ color: {TEXT_DIM}; font-size: 12px; }}
+QLabel#menuTitle:disabled, QLabel#menuDesc:disabled {{ color: {TEXT_MUTED}; }}
+QLabel#menuState {{ color: {TEXT_MUTED}; font-size: 11px; font-weight: bold; border: 1px solid {BORDER_2};
+    border-radius: 9px; padding: 1px 8px; }}
+QLabel#menuState[on="true"] {{ color: {OK}; border-color: {ACCENT}; }}
+
 QMessageBox, QInputDialog {{ background: {SURFACE}; }}
 QMessageBox QLabel, QInputDialog QLabel {{ color: {TEXT}; }}
 QMessageBox QPushButton, QInputDialog QPushButton, QDialogButtonBox QPushButton {{ min-width: 84px; }}

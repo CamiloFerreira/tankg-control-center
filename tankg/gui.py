@@ -609,6 +609,8 @@ class MainWindow(QMainWindow):
             return a
 
         self.act: dict[str, QAction] = {}
+        act("menu", "☰ Menú", lambda: dialogs.CommandMenu(self).exec(), "Ctrl+Shift+P",
+            "Todas las acciones, con buscador (Ctrl+Shift+P)")
         act("read", "Leer pedalera", self.read_device, "F5", "Leer los 36 presets de la pedalera (F5)")
         act("send_all", "Guardar cambios", self.send_all, "Ctrl+Return",
             "Subir a la pedalera todos los presets modificados (Ctrl+Enter)")
@@ -646,7 +648,7 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.addToolBar(tb)
-        for key in ("read", "send_all", "undo", None, "library", "ai"):
+        for key in ("menu", None, "read", "send_all", "undo", None, "library", "ai"):
             if key is None:
                 tb.addSeparator()
             else:
@@ -701,9 +703,54 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         self._action(m, "Desconectar de Google Drive", self.cloud_disconnect)
         m = mb.addMenu("A&yuda")
+        m.addAction(a["menu"])
+        m.addSeparator()
         self._action(m, "Buscar actualizaciones", self.check_updates)
         self._action(m, "Bytes del preset", self.show_bytes)
         self._action(m, "Acerca de", self.about)
+
+    # command menu (dialogs.CommandMenu, same commands as the APK menu) -------------------
+
+    def command_state(self) -> dict:
+        """command -> False when it can't run now (dimmed), None when it doesn't apply (hidden)."""
+        has, dev = self.local is not None, self.connected
+        mod = self.modified_slots()
+        cur_mod = self.current in mod
+        cloud_on = bool(library.Settings().cloud.get("refresh_token"))
+        state = {"saveAll": dev and bool(mod), "saveOne": dev and cur_mod, "activate": dev, "live": dev,
+                 "undo": bool(self.undo_stack), "paste": self.clipboard is not None, "revert": cur_mod,
+                 "revertAll": bool(mod), "backupNow": dev, "restoreFile": dev, "cloudPush": has, "cloudPull": has}
+        for cmd in ("copy", "duplicate", "swap", "left", "right", "renameBank", "library", "ai", "factory",
+                    "factoryBank", "factoryAll", "saveBank", "importPreset", "exportPreset", "importSet", "exportSet",
+                    "compare", "bytes"):
+            state[cmd] = state.get(cmd, True) and has
+        for cmd in ("cloudConnect", "cloudPush", "cloudPull", "cloudHistory", "cloudDisconnect"):
+            if (cmd == "cloudConnect") == cloud_on:
+                state[cmd] = None
+        return state
+
+    def run_command(self, cmd: str) -> None:
+        self.command_actions()[cmd]()
+
+    def command_actions(self) -> dict:
+        return {
+            "read": self.read_device, "saveAll": self.send_all, "saveOne": self.send_selected,
+            "activate": self.activate_selected, "live": lambda: self.live_action.setChecked(not self.live_action.isChecked()),
+            "port": self.choose_midi_port, "undo": self.undo, "copy": self.copy_preset, "paste": self.paste_preset,
+            "duplicate": self.duplicate_preset, "swap": self.swap_preset, "left": lambda: self.move_preset(-1),
+            "right": lambda: self.move_preset(1), "renameBank": lambda: self.rename_bank(self.current // 4),
+            "revert": self.revert_selected, "revertAll": self.revert_all, "library": self.open_artists, "ai": self.open_ai,
+            "factory": self.factory_selected, "factoryBank": self.factory_current_bank, "factoryAll": self.factory_all,
+            "ampUpload": self.upload_amp_model, "factoryAmpCab": lambda: dialogs.FactoryAmpCabDialog(self).exec(),
+            "backupNow": self.backup_device, "backups": lambda: dialogs.BackupManager(self).exec(),
+            "restoreFile": self.restore_to_device, "openBank": self.open_bank, "saveBank": self.save_bank,
+            "importPreset": self.import_preset, "exportPreset": self.export_preset, "importSet": self.import_bank_set,
+            "exportSet": self.export_bank_set, "compare": self.compare_file, "cloudConnect": self.cloud_connect,
+            "cloudPush": lambda: self.cloud_push(quiet=False), "cloudPull": lambda: self.cloud_check(manual=True),
+            "cloudHistory": self.cloud_history, "cloudDisconnect": self.cloud_disconnect,
+            "calibrate": lambda: dialogs.CalibrationWizard(self).exec(), "update": self.check_updates,
+            "bytes": self.show_bytes, "about": self.about,
+        }
 
     def _action(self, menu, text, fn, shortcut=None):
         a = QAction(text, self)

@@ -24,66 +24,16 @@
   <button id="menuBtn" class="icon" aria-label="Menú">⋮</button>
 </header>
 
-<!-- full menu: same groups as the desktop menu bar -->
-<div id="menuSheet" class="sheet" hidden>
+<!-- full menu: built by renderMenu() in app.js from MENU of tankg/menu.py (via data.js), the same
+     menu as the desktop command menu;
+     a full-screen sheet on phones, a side panel on tablets -->
+<div id="menuSheet" class="sheet menu-sheet" hidden>
   <div class="sheet-head"><button class="icon" data-close aria-label="Cerrar">←</button><h2>Menú</h2></div>
-  <div class="sheet-body menu-groups">
-    <section><h3>Pedalera</h3>
-      <button data-cmd="read">Leer presets</button>
-      <button data-cmd="saveAll">Guardar todos los cambios</button>
-      <button data-cmd="saveOne">Guardar este preset</button>
-      <button data-cmd="activate">Activar este preset</button>
-      <button data-cmd="live" class="toggle">Escucha en vivo</button>
-      <button data-cmd="backupNow">Hacer backup ahora</button>
-      <button data-cmd="backups">Gestor de backups</button>
-      <button data-cmd="restoreFile">Restaurar banco desde archivo…</button>
-      <button data-cmd="ampUpload">Subir modelo de AMP (.am4data)…</button>
-      <button data-cmd="factoryAmpCab">Restaurar AMP/CAB de fábrica…</button>
-      <button data-cmd="port">Puerto MIDI…</button>
-      <button data-cmd="calibrate">Asistente de calibración…</button>
-    </section>
-    <section><h3>Editar</h3>
-      <button data-cmd="undo">Deshacer</button>
-      <button data-cmd="copy">Copiar preset</button>
-      <button data-cmd="paste">Pegar preset</button>
-      <button data-cmd="duplicate">Duplicar en otro slot…</button>
-      <button data-cmd="swap">Intercambiar con otro slot…</button>
-      <button data-cmd="left">Mover a la izquierda</button>
-      <button data-cmd="right">Mover a la derecha</button>
-      <button data-cmd="renameBank">Renombrar banco…</button>
-      <button data-cmd="library">Biblioteca de sonidos</button>
-      <button data-cmd="ai">Crear con IA…</button>
-      <button data-cmd="factory">Restaurar este preset de fábrica</button>
-      <button data-cmd="factoryBank">Restaurar banco actual de fábrica</button>
-      <button data-cmd="factoryAll">Restaurar los 36 presets de fábrica</button>
-      <button data-cmd="revert">Revertir este preset</button>
-      <button data-cmd="revertAll">Revertir todo</button>
-    </section>
-    <section><h3>Nube (Google Drive)</h3>
-      <button data-cmd="cloudConnect">Conectar con Google Drive…</button>
-      <button data-cmd="cloudPush">Subir a la nube ahora</button>
-      <button data-cmd="cloudPull">Traer de la nube…</button>
-      <button data-cmd="cloudHistory">Historial de la nube…</button>
-      <button data-cmd="cloudDisconnect">Desconectar de Google Drive</button>
-    </section>
-    <section><h3>Archivo</h3>
-      <button data-cmd="openBank">Abrir banco (.tgbank)…</button>
-      <button data-cmd="saveBank">Guardar banco como .tgbank</button>
-      <button data-cmd="importPreset">Importar preset (.tgpreset)…</button>
-      <button data-cmd="exportPreset">Exportar preset</button>
-      <button data-cmd="importSet">Importar banco de 4 (.tgset)…</button>
-      <button data-cmd="exportSet">Exportar banco de 4 (.tgset)</button>
-      <button data-cmd="compare">Comparar con archivo de banco…</button>
-    </section>
-    <section><h3>App</h3>
-      <button data-cmd="view">Vista: automática</button>
-      <button data-cmd="demo">Modo demo (sin pedalera)</button>
-      <button data-cmd="update">Buscar actualizaciones</button>
-      <button data-cmd="bytes">Bytes del preset</button>
-      <button data-cmd="about">Acerca de</button>
-    </section>
-  </div>
+  <label class="menu-search"><svg class="ic"><use href="#i-search"/></svg>
+    <input id="menuSearch" type="search" placeholder="Buscar: guardar, nube, fábrica, AMP…" autocomplete="off" aria-label="Buscar en el menú"></label>
+  <div id="menuBody" class="sheet-body menu-groups"></div>
 </div>
+<div id="menuShade" class="menu-shade"></div>
 
 <main id="app">
   <section id="empty" class="empty">
