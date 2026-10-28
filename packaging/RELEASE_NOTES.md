@@ -11,7 +11,25 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
-## Novedades (1.8.4)
+## Novedades (1.9.0)
+
+- **Packs de bandas con AMP reales.** En la Biblioteca hay un grupo nuevo, **«★ Con AMP importado»**: 11 bancos
+  (Pantera, Metallica, Guns N' Roses, AC/DC y Zeppelin, Van Halen, Iron Maiden y Priest, metal 5150, Blues y SRV,
+  Queen/U2, Pink Floyd, Ozzy y Zakk Wylde) con presets hechos para capturas del amplificador de cada banda.
+  - Los modelos son capturas de sus autores en la **comunidad de M-VAVE**: la app no los incluye, los descarga de
+    su publicación original cuando los necesitas y muestra el crédito de cada autor. Si falta alguno, pregunta.
+  - **Descargar AMP de los packs** (menú) los baja todos de una vez y quedan en el equipo, para usarlos sin conexión.
+  - Al importar, cada modelo va a un TYPE (puedes cambiarlo y los presets se ajustan solos); se suben los AMP y
+    luego los presets, verificados, por Bluetooth.
+- **Packs propios (.tgpack):** exporta un preset, un banco o los 36 junto con los AMP que subiste, e impórtalos en
+  otro equipo (Archivos → Importar/Exportar pack).
+- **Avisos:** si un preset de un pack apunta a un TYPE donde ahora hay otro modelo, el editor lo dice y permite
+  subir el correcto con un toque; antes de subir un AMP la app dice cuántos presets usan ese TYPE.
+- **La IA conoce tus AMP subidos** y puede usarlos al crear presets y bancos.
+- **Google Drive** sincroniza también de dónde vino cada AMP; en otro equipo ofrece descargar los que falten.
+- Android: los .tgset/.tgpreset ya no se guardan como «.json».
+
+## Versión 1.8.4
 
 - **Windows/Linux: el menú se abre dentro de la ventana**, como en Android: un panel que se desliza
   desde la izquierda sobre el editor («☰ Menú» o Ctrl+Shift+P; se cierra con Esc o tocando fuera).
