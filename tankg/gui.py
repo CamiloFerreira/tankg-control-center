@@ -399,6 +399,14 @@ class MainWindow(QMainWindow):
         self.conn = QLabel()
         self.conn.setObjectName("conn")
         self.statusBar().addPermanentWidget(self.conn)
+        # Google Drive: the editor is mirrored a moment after every change once the startup sync is done
+        self.cloud_label = QLabel("")
+        self.cloud_label.setObjectName("hint")
+        self.statusBar().addPermanentWidget(self.cloud_label)
+        self._cloud_started = self._cloud_ready = self._cloud_busy = False
+        self.cloud_timer = QTimer(self)
+        self.cloud_timer.setSingleShot(True)
+        self.cloud_timer.timeout.connect(self._cloud_autopush)
         self._build_actions()
         self._build_toolbar()
         self._build_menus()
@@ -408,7 +416,7 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self._poll_device)
         self.timer.start(2000)
         self._bg: set[Background] = set()
-        self._cloud_checked = False
+        QTimer.singleShot(4000, self.cloud_startup)   # without a pedal: sync the editor anyway
         settings = library.Settings()
         if updater.can_self_update() and time.time() - settings.data.get("last_update_check", 0) > 20 * 3600:   # once a day
             QTimer.singleShot(5000, lambda: self.check_updates(quiet=True))
@@ -741,6 +749,7 @@ class MainWindow(QMainWindow):
         self._schedule_live()
 
     def refresh(self) -> None:
+        self._schedule_cloud()
         modified = set(self.modified_slots())
         for b in self.slot_buttons:
             p = self.local.presets[b.slot] if self.local else None
@@ -913,14 +922,16 @@ class MainWindow(QMainWindow):
             return
 
         def done(bank: Bank) -> None:
+            first = self.device is None and self.local is not None   # editor loaded before the pedal (cloud, file)
             self.device = bank
+            if first:
+                self.statusBar().showMessage("Pedalera leída: lo distinto del editor queda como cambios sin guardar", 6000)
+                return
             if self.local is not None:
                 self._push_undo()
             self.local = bank.copy()
             self.statusBar().showMessage("Presets leídos de la pedalera", 4000)
-            if not self._cloud_checked:
-                self._cloud_checked = True
-                QTimer.singleShot(300, self.cloud_check)
+            QTimer.singleShot(300, self.cloud_startup)
 
         if not self._run(lambda dev, _: dev.read_bank(), done, "Leyendo presets..."):
             QMessageBox.information(self, "Ocupado", "Hay una operación en curso.")
@@ -976,7 +987,6 @@ class MainWindow(QMainWindow):
             dialog.finished(msg + (" · backup previo hecho" if path else ""))
             self.statusBar().showMessage(f"Guardado y verificado: {names}"
                                          + (f" · backup previo: {path}" if path else ""), 8000)
-            self.cloud_push()
 
         self._run(self._write_job(slots, select), done, "Guardando...", dialog=dialog)
         dialog.show()
@@ -1409,7 +1419,8 @@ class MainWindow(QMainWindow):
                 dlg.accept()
                 library.Settings().set_cloud({"refresh_token": token})
                 self.statusBar().showMessage("Conectado con Google Drive: los presets se sincronizan solos.", 8000)
-                self.cloud_check(after_connect=True)
+                self._cloud_started = self._cloud_ready = False
+                self.cloud_startup()
 
             def failed(message: str) -> None:
                 if not closed:   # cancelled by the user: nothing to say
@@ -1425,19 +1436,91 @@ class MainWindow(QMainWindow):
         if library.Settings().cloud and dialogs.ask(self, "Nube", "¿Desconectar de Google Drive en este equipo?\n"
                                                     "Lo guardado en la nube no se borra."):
             library.Settings().set_cloud(None)
+            self._cloud_status("")
             self.statusBar().showMessage("Desconectado de Google Drive.", 5000)
 
+    def _cloud_doc(self) -> dict | None:
+        """What the cloud mirrors: the editor (or the pedal if nothing is loaded) and the names."""
+        bank = self.local or self.device
+        return (cloud.make_doc(bank, self.aliases.presets, self.aliases.banks, amps=self.aliases.amps)
+                if bank is not None else None)
+
+    def _cloud_status(self, text: str) -> None:
+        self.cloud_label.setText(text)
+
+    def _schedule_cloud(self) -> None:
+        if getattr(self, "_cloud_ready", False) and self._drive() is not None:
+            self.cloud_timer.start(2500)
+
+    def _cloud_autopush(self) -> None:
+        drive, doc = self._drive(), self._cloud_doc()
+        if drive is None or doc is None or cloud.doc_key(doc) == library.Settings().cloud.get("synced"):
+            return
+        if self._cloud_busy:
+            self.cloud_timer.start(2500)
+            return
+        self._cloud_busy = True
+        self._cloud_status("☁ Guardando cambios en la nube…")
+
+        def done(_) -> None:
+            self._cloud_busy = False
+            self._mark_synced(doc)
+            self._cloud_status(f"☁ Cambios guardados en la nube {time.strftime('%H:%M')}")
+            self._schedule_cloud()   # changes made during the upload
+
+        def failed(message: str) -> None:
+            self._cloud_busy = False
+            self._cloud_status("☁ Sin conexión con la nube: se reintentará")
+            self.cloud_timer.start(60000)
+
+        self._background(lambda: cloud.push(drive, doc), done, failed)
+
+    def cloud_startup(self) -> None:
+        """Once per start (after reading the pedal, or a few seconds without it): the editor takes the
+        cloud version; it only asks when something was edited here before the sync finished."""
+        if self._cloud_started:
+            return
+        self._cloud_started = True
+        drive = self._drive()
+        if drive is None:
+            return
+        self._cloud_status("☁ Sincronizando con la nube…")
+        edits = len(self.undo_stack)
+
+        def done(doc) -> None:
+            self._cloud_ready = True
+            current = self._cloud_doc()
+            if doc is None or (current is not None and cloud.doc_key(current) == cloud.doc_key(doc)):
+                if doc is not None:
+                    self._mark_synced(doc)
+                self._cloud_status("☁ Al día con la nube")
+                self._schedule_cloud()   # first device: the cloud starts with this setup
+                return
+            if current is None or len(self.undo_stack) == edits or dialogs.ask(
+                    self, "Nube", f"Hay presets en la nube guardados desde {doc.get('device', 'otro equipo')} "
+                                  f"({cloud_when(doc['updated'])}) y aquí ya hiciste cambios.\n¿Cargar los de la nube? "
+                                  "(si no, la nube se actualiza con lo de este equipo)"):
+                self.load_cloud(doc)
+                self._mark_synced(doc)
+                self._cloud_status(f"☁ Sincronizado con la nube ({doc.get('device', 'otro equipo')})")
+            self._schedule_cloud()
+
+        def failed(message: str) -> None:
+            self._cloud_ready = True
+            self._cloud_status("☁ Sin conexión con la nube")
+
+        self._background(lambda: cloud.pull(drive), done, failed)
+
     def cloud_push(self, quiet: bool = True) -> None:
-        """Uploads what the pedal holds (or the editor if the pedal was never read) and the names."""
+        """«Subir a la nube ahora»: uploads the editor and the names."""
         drive = self._drive()
         if drive is None:
             if not quiet:
                 self.cloud_connect()
             return
-        bank = self.device or self.local
-        if bank is None:
+        doc = self._cloud_doc()
+        if doc is None:
             return
-        doc = cloud.make_doc(bank, self.aliases.presets, self.aliases.banks)
 
         def done(_) -> None:
             self._mark_synced(doc)
@@ -1459,11 +1542,7 @@ class MainWindow(QMainWindow):
                 if after_connect or manual:
                     self.cloud_push(quiet=not manual)
                 return
-            bank, presets, banks = cloud.parse_doc(doc)
-            current = self.device or self.local
-            same = (bank.to_bytes() == current.to_bytes() and presets == self.aliases.presets
-                    and banks == self.aliases.banks)
-            if same:
+            if cloud.doc_key(doc) == cloud.doc_key(self._cloud_doc()):
                 self._mark_synced(doc)
                 if manual:
                     QMessageBox.information(self, "Nube", "La nube y este equipo ya tienen lo mismo.")
@@ -1474,20 +1553,30 @@ class MainWindow(QMainWindow):
             if dialogs.ask(self, "Nube", f"Hay presets en la nube guardados desde {doc.get('device', 'otro equipo')} "
                                          f"({when}).\n¿Cargarlos en el editor? La pedalera no cambia hasta que pulses "
                                          "«Guardar cambios»."):
-                self.load_cloud(bank, presets, banks)
+                self.load_cloud(doc)
             self._mark_synced(doc)
 
         self._background(lambda: cloud.pull(drive), done,
                          lambda m: QMessageBox.warning(self, "Nube", m) if manual else
                          self.statusBar().showMessage(f"Nube: {m}", 8000))
 
-    def load_cloud(self, bank: Bank, presets: dict, banks: dict) -> None:
+    def load_cloud(self, doc: dict) -> None:
+        """Editor, preset/bank names and AMP model names from a cloud version."""
+        try:
+            bank, presets, banks = cloud.parse_doc(doc)
+        except (cloud.CloudError, ValueError) as e:
+            QMessageBox.warning(self, "Nube", str(e))
+            return
         self._push_undo()
         self.local = bank.copy()
         self.aliases.presets, self.aliases.banks = dict(presets), dict(banks)
+        self.aliases.amps = cloud.doc_amps(doc)
         self.aliases.save()
+        self.refresh_amp_labels()
         self.refresh()
-        self.statusBar().showMessage("Presets de la nube cargados. «Guardar cambios» los pasa a la pedalera.", 8000)
+        n = len(self.modified_slots())
+        self.statusBar().showMessage("Presets de la nube cargados" + (
+            f": {n} distintos de la pedalera, «Guardar cambios» los pasa." if n else "."), 8000)
 
     def cloud_history(self) -> None:
         drive = self._drive()
@@ -1503,8 +1592,8 @@ class MainWindow(QMainWindow):
             label, ok = QInputDialog.getItem(self, "Historial de la nube", "Versión para cargar en el editor:", labels, 0, False)
             if ok:
                 chosen = files[labels.index(label)]
-                self._background(lambda: cloud.parse_doc(drive.read(chosen["id"])),
-                                 lambda r: self.load_cloud(*r), lambda m: QMessageBox.warning(self, "Nube", m))
+                self._background(lambda: drive.read(chosen["id"]), self.load_cloud,
+                                 lambda m: QMessageBox.warning(self, "Nube", m))
 
         self._background(lambda: cloud.history(drive), listed, lambda m: QMessageBox.warning(self, "Nube", m))
 

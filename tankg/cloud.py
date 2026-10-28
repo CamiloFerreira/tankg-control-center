@@ -11,7 +11,8 @@ Files in the "Tank-G Control Center" folder:
     tankg-cloud.json              latest version
     tankg-history-<stamp>.json    previous versions (newest HISTORY_KEEP are kept)
 Both hold {"format": "tankg-cloud", "version": 1, "updated": ISO time (UTC), "device": "...",
-"bank": hex of the 758-byte bank, "aliases": {"presets": {...}, "banks": {...}}}.
+"bank": hex of the 758-byte bank, "aliases": {"presets": {...}, "banks": {...}, "amps": {...}}}
+("amps", the names of uploaded AMP models, only when there is one).
 """
 from __future__ import annotations
 
@@ -191,10 +192,12 @@ class Drive:
 
 # sync -------------------------------------------------------------------------------------------
 
-def make_doc(bank: Bank, presets: dict, banks: dict, device: str | None = None) -> dict:
+def make_doc(bank: Bank, presets: dict, banks: dict, device: str | None = None, amps: dict | None = None) -> dict:
+    aliases = {"presets": dict(presets), "banks": dict(banks)}
+    if amps:
+        aliases["amps"] = dict(amps)
     return {"format": FORMAT, "version": 1, "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "device": device or device_name(), "bank": bank.to_bytes().hex(),
-            "aliases": {"presets": dict(presets), "banks": dict(banks)}}
+            "device": device or device_name(), "bank": bank.to_bytes().hex(), "aliases": aliases}
 
 
 def doc_key(doc: dict) -> str:
@@ -209,6 +212,11 @@ def parse_doc(doc: dict) -> tuple[Bank, dict, dict]:
     bank = Bank.from_bytes(bytes.fromhex(doc["bank"]))
     aliases = doc.get("aliases") or {}
     return bank, dict(aliases.get("presets") or {}), dict(aliases.get("banks") or {})
+
+
+def doc_amps(doc: dict) -> dict:
+    """Names of the uploaded AMP models ({"3": "RANDALL Clean"}); empty = factory models."""
+    return dict((doc.get("aliases") or {}).get("amps") or {})
 
 
 def push(drive: Drive, doc: dict) -> None:

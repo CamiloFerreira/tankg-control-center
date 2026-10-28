@@ -217,6 +217,7 @@ function render() {
   rememberDraft();
   updateActions(mod);
   scheduleLive();
+  scheduleCloud();
 }
 
 function updateActions(mod = new Set(modified())) {
@@ -341,7 +342,7 @@ async function connect(silent = false) {
     watchPorts(dev.access);
     adoptBank(dev.bank, fromDemo);
     toast(`Tank-G conectada (${S.dev.portName})`);
-    if (!cloudChecked) { cloudChecked = true; setTimeout(() => cloudCheck(), 500); }
+    setTimeout(cloudStartup, 500);
   } catch (e) {
     S.dev = null;
     if (!silent) {
@@ -476,7 +477,6 @@ async function upload(slots, selectSlot = null) {
     });
     S.device = after;
     if (selectSlot !== null) S.dev.selectPreset(selectSlot);
-    cloudPush();
     mark(total);
     $("mBar").firstElementChild.style.width = "100%";
     step(`✓ ${total} preset${total > 1 ? "s" : ""} guardado${total > 1 ? "s" : ""} y verificado${total > 1 ? "s" : ""}`, "ok");
@@ -1161,7 +1161,65 @@ globalThis.__updateState = (state, detail) => {
 const cloudState = () => store.get("tankg.cloud", {});
 const setCloud = v => store.set("tankg.cloud", v);
 const drive = () => (cloud.configured() && cloudState().refreshToken ? new cloud.Drive(cloudState().refreshToken) : null);
-let cloudChecked = false;
+// The editor is mirrored a moment after every change once the startup sync is done (same as desktop).
+const C = { started: false, ready: false, busy: false, timer: 0 };
+const cloudStatus = text => { $("cloudStatus").textContent = text; $("cloudStatus").hidden = !text; };
+const cloudDoc = () => {
+  const bank = S.local || S.device;
+  return bank && !S.demo ? cloud.makeDoc(bank, aliases.presets, aliases.banks, aliases.amps) : null;
+};
+
+function scheduleCloud(ms = 2500) {
+  if (!C.ready || !drive()) return;
+  clearTimeout(C.timer);
+  C.timer = setTimeout(cloudAutoPush, ms);
+}
+
+async function cloudAutoPush() {
+  const d = drive(), doc = cloudDoc();
+  if (!d || !doc || (await cloud.docKey(doc)) === cloudState().synced) return;
+  if (C.busy) return scheduleCloud();
+  C.busy = true;
+  cloudStatus("☁ Guardando cambios en la nube…");
+  try {
+    await cloud.push(d, doc);
+    setCloud({ ...cloudState(), synced: await cloud.docKey(doc) });
+    cloudStatus(`☁ Cambios guardados en la nube ${new Date().toTimeString().slice(0, 5)}`);
+    C.busy = false;
+    scheduleCloud();   // changes made during the upload
+  } catch {
+    C.busy = false;
+    cloudStatus("☁ Sin conexión con la nube: se reintentará");
+    scheduleCloud(60000);
+  }
+}
+
+/** Once per start (after connecting the pedal, or a few seconds without it): the editor takes the cloud
+ *  version; it only asks when something was edited here before the sync finished. */
+async function cloudStartup() {
+  if (C.started || S.demo) return;
+  C.started = true;
+  const d = drive();
+  if (!d) return;
+  cloudStatus("☁ Sincronizando con la nube…");
+  const edits = S.undo.length;
+  let doc;
+  try { doc = await cloud.pull(d); } catch { C.ready = true; return cloudStatus("☁ Sin conexión con la nube"); }
+  C.ready = true;
+  const current = cloudDoc(), key = doc && await cloud.docKey(doc);
+  if (!doc || (current && (await cloud.docKey(current)) === key)) {
+    if (doc) setCloud({ ...cloudState(), synced: key });
+    cloudStatus("☁ Al día con la nube");
+    return scheduleCloud();   // first device: the cloud starts with this setup
+  }
+  if (!current || S.undo.length === edits || await ask("Nube", `Hay presets en la nube guardados desde ${doc.device || "otro equipo"} `
+    + `(${cloud.when(doc.updated)}) y aquí ya hiciste cambios.\n¿Cargar los de la nube? (si no, la nube se actualiza con lo de este equipo)`)) {
+    loadCloud(cloud.parseDoc(doc));
+    setCloud({ ...cloudState(), synced: key });
+    cloudStatus(`☁ Sincronizado con la nube (${doc.device || "otro equipo"})`);
+  }
+  scheduleCloud();
+}
 
 async function cloudConnect() {
   if (!cloud.configured()) return info("Nube", "Esta versión no tiene configurada la sincronización con Google Drive.");
@@ -1179,7 +1237,8 @@ async function cloudConnect() {
     setCloud({ refreshToken: token });
     closeModal();
     toast("Conectado con Google Drive: los presets se sincronizan solos", 4000);
-    cloudCheck({ afterConnect: true });
+    C.started = C.ready = false;
+    cloudStartup();
   } catch (e) {
     if (!cancelled) { $("mStep").textContent = e.message; $("mStep").className = "bad"; $("mOk").hidden = true; }
   }
@@ -1188,9 +1247,8 @@ async function cloudConnect() {
 async function cloudPush(quiet = true) {
   const d = drive();
   if (!d) { if (!quiet) cloudConnect(); return; }
-  const bank = S.device || S.local;
-  if (!bank || S.demo) return;
-  const doc = cloud.makeDoc(bank, aliases.presets, aliases.banks);
+  const doc = cloudDoc();
+  if (!doc) return;
   try {
     await cloud.push(d, doc);
     setCloud({ ...cloudState(), synced: await cloud.docKey(doc) });
@@ -1199,12 +1257,13 @@ async function cloudPush(quiet = true) {
 }
 
 function loadCloud(r) {
-  pushUndo();
+  if (S.local) pushUndo();
   S.local = r.bank;
-  aliases = { ...aliases, presets: r.presets, banks: r.banks };
+  aliases = { ...aliases, presets: r.presets, banks: r.banks, amps: r.amps || {} };
   saveAliases();
   render();
-  toast("Presets de la nube cargados. «Guardar» los pasa a la pedalera.", 4500);
+  const n = modified().length;
+  toast(`Presets de la nube cargados${n ? `: ${n} distintos de la pedalera, «Guardar» los pasa` : ""}.`, 4500);
 }
 
 async function cloudCheck({ manual = false, afterConnect = false } = {}) {
@@ -1214,9 +1273,7 @@ async function cloudCheck({ manual = false, afterConnect = false } = {}) {
   try { doc = await cloud.pull(d); } catch (e) { return manual ? info("Nube", e.message) : toast(`Nube: ${e.message}`, 5000); }
   if (!doc) { if (afterConnect || manual) cloudPush(!manual); return; }
   const r = cloud.parseDoc(doc), key = await cloud.docKey(doc);
-  const current = S.device || S.local;
-  const same = toHex(r.bank.toBytes()) === toHex(current.toBytes()) &&
-    JSON.stringify(r.presets) === JSON.stringify(aliases.presets) && JSON.stringify(r.banks) === JSON.stringify(aliases.banks);
+  const same = key === (await cloud.docKey(cloudDoc()));
   if (same) { setCloud({ ...cloudState(), synced: key }); if (manual) info("Nube", "La nube y este equipo ya tienen lo mismo."); return; }
   if (!manual && key === cloudState().synced) return;
   if (await ask("Nube", `Hay presets en la nube guardados desde ${doc.device || "otro equipo"} (${cloud.when(doc.updated)}).\n` +
@@ -1371,6 +1428,7 @@ async function run(cmd) {
     case "cloudHistory": return cloudHistory();
     case "cloudDisconnect":
       if (cloudState().refreshToken && await ask("Nube", "¿Desconectar de Google Drive en este equipo?\nLo guardado en la nube no se borra.")) {
+        cloudStatus("");
         setCloud({});
         toast("Desconectado de Google Drive");
       }
@@ -1521,6 +1579,7 @@ $("emptyHint").textContent = "Conecta la pedalera por USB-OTG o, si es una Tank-
 S.wanted = true;
 midiAccess().then(watchPorts);
 connect(true);
+setTimeout(cloudStartup, 4000);   // without a pedal: sync the editor anyway
 setInterval(() => {   // a Bluetooth pedal sends no "plugged in" event: retry quietly, like M-EFCS
   if (S.wanted && !S.dev && !S.busy && !S.demo && document.visibilityState === "visible" && androidBluetoothPedals().length) connect(true);
 }, 15000);

@@ -169,32 +169,67 @@ def test_qt_platform_falls_back_to_wayland_when_xcb_cannot_start(monkeypatch, tm
     os.environ["QT_QPA_PLATFORM"] = "offscreen"   # keep the other tests headless
 
 
-def test_cloud_sync_push_after_save_and_offer_newer(env, tmp_path, monkeypatch):
+def test_cloud_autosync_edits_and_loads_newer_at_start(env, tmp_path, monkeypatch):
     import json
     from test_tankg import FakeGoogle
     from tankg import cloud
-    w, pedal, wait, _ = env
+    w, pedal, wait, messages = env
     google = FakeGoogle()
     monkeypatch.setattr(cloud, "_request", google)
     monkeypatch.setattr(cloud, "CLIENT_ID", "id")
     monkeypatch.setattr(cloud, "CLIENT_SECRET", "secret")
     monkeypatch.setattr(library, "SETTINGS_FILE", tmp_path / "settings.json")
     library.Settings().set_cloud({"refresh_token": "r"})
+    w._cloud_started = w._cloud_ready = False
+    w.cloud_startup()   # empty cloud: this device starts it
+    assert wait(lambda: len(google.files) == 1 and not w._bg, 8)
+    # any edit in the editor goes up by itself a moment later, without saving to the pedal
     p = w.local.presets[0].copy()
     p.set("gain", 21)
     w._set_local(0, p)
     w.aliases.set_preset(0, "Desde Linux")
-    w.send_selected()   # verified write -> automatic push
-    assert wait(lambda: not w.busy) and wait(lambda: len(google.files) == 1 and not w._bg)
-    doc = json.loads(next(iter(google.files.values()))["body"])
-    assert bytes.fromhex(doc["bank"])[2:23] == p.to_bytes() and doc["aliases"]["presets"]["1A"] == "Desde Linux"
-    # another device (the phone) saves a newer version
+    w.aliases.set_bank(0, "Banco Linux")
+    w.refresh()
+    assert wait(lambda: "guardados" in w.cloud_label.text(), 8)
+    doc = json.loads(next(f for f in google.files.values() if f["name"] == cloud.LATEST)["body"])
+    assert bytes.fromhex(doc["bank"])[2:23] == p.to_bytes()
+    assert doc["aliases"]["presets"]["1A"] == "Desde Linux" and doc["aliases"]["banks"]["1"] == "Banco Linux"
+    assert w.modified_slots() == [0]   # the pedal is untouched
+    # another device (the phone) saves a newer version; the next start loads it without asking
     other = w.device.copy()
     other.presets[1].set("gain", 99)
-    newer = cloud.make_doc(other, {"1B": "Desde Android"}, {}, "Android · moto")
-    next(iter(google.files.values()))["body"] = json.dumps(newer).encode()
-    w.cloud_check()
-    assert wait(lambda: not w._bg)
+    newer = cloud.make_doc(other, {"1B": "Desde Android"}, {"2": "Banco Android"}, "Android · moto", amps={"3": "RANDALL"})
+    next(f for f in google.files.values() if f["name"] == cloud.LATEST)["body"] = json.dumps(newer).encode()
+    w._cloud_started = w._cloud_ready = False
+    w.cloud_startup()
+    assert wait(lambda: not w._bg and w._cloud_ready)
     assert w.local.presets[1].get("gain") == 99 and w.aliases.preset(1) == "Desde Android"
-    assert set(w.modified_slots()) >= {1}   # in the editor only, until «Guardar cambios»
+    assert w.aliases.bank(1) == "Banco Android" and w.aliases.amp(2) == "RANDALL"
+    assert w.controls["amp_type"].combo.itemText(2) == "3. RANDALL"
+    assert set(w.modified_slots()) >= {1} and not messages   # in the editor only, until «Guardar cambios»
     assert library.Settings().cloud["synced"] == cloud.doc_key(newer)
+
+
+@pytest.mark.parametrize("which", ["factory", "amp"])
+def test_amp_cab_windows_close_after_bluetooth_not_found(env, which):
+    """Without a Bluetooth pedal the job fails; the window shows the error and can be closed."""
+    w, _, wait, messages = env
+    from tankg.device import DeviceError
+
+    def no_bluetooth():
+        raise DeviceError("No se encontró la Tank-G por Bluetooth.")
+
+    with mock.patch.object(gui.TankG, "open_bluetooth", staticmethod(no_bluetooth)):
+        if which == "factory":
+            d = dialogs.FactoryAmpCabDialog(w)
+        else:
+            d = dialogs.AmpUploadDialog(w, (__import__("pathlib").Path(__file__).parent / "am4_synthetic.am4data").read_bytes(), "X")
+        d.show()
+        d._start()
+        d.reject()                       # ignored while the job runs
+        assert d.isVisible()
+        assert wait(lambda: not w.busy)
+    assert not d.running and d.close_btn.isEnabled() and d.go.isEnabled()
+    assert "Bluetooth" in d.step.text() and not messages
+    d.reject()
+    assert not d.isVisible()

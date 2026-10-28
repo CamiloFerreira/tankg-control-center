@@ -10,3 +10,4 @@ android/build/
 # Google OAuth clients (shipped inside the builds, never committed)
 tankg/cloud_secrets.json
 android/ui/js/secrets.js
+.claude/settings.local.json

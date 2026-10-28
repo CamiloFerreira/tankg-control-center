@@ -123,15 +123,19 @@ export class Drive {
 
 // sync -----------------------------------------------------------------------------------------
 
-export function makeDoc(bank, presets, banks) {
+/** Same as cloud.make_doc: "amps" (names of uploaded AMP models) only when there is one. */
+export function makeDoc(bank, presets, banks, amps = {}) {
+  const aliases = { presets: { ...presets }, banks: { ...banks } };
+  if (Object.keys(amps || {}).length) aliases.amps = { ...amps };
   return { format: FORMAT, version: 1, updated: new Date().toISOString().replace(/\.\d+Z$/, "+00:00"),
-    device: "Android", bank: toHex(bank.toBytes()), aliases: { presets: { ...presets }, banks: { ...banks } } };
+    device: "Android", bank: toHex(bank.toBytes()), aliases };
 }
 
 export function parseDoc(doc) {
   if (doc?.format !== FORMAT) throw new CloudError("El archivo de la nube no es de Tank-G Control Center.");
   const a = doc.aliases || {};
-  return { bank: Bank.fromBytes(fromHex(doc.bank)), presets: { ...(a.presets || {}) }, banks: { ...(a.banks || {}) } };
+  return { bank: Bank.fromBytes(fromHex(doc.bank)), presets: { ...(a.presets || {}) }, banks: { ...(a.banks || {}) },
+    amps: { ...(a.amps || {}) } };
 }
 
 const sorted = v => (v && typeof v === "object" && !Array.isArray(v)

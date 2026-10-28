@@ -86,7 +86,8 @@ def test_ui_cloud_reads_desktop_documents(tmp_path):
     import json
     from tankg import cloud
     from tankg.model import Bank
-    doc = cloud.make_doc(Bank.from_bytes((ROOT / "tests/live_bank.bin").read_bytes()), {"1A": "Limpio ñ"}, {"1": "Rock"})
+    doc = cloud.make_doc(Bank.from_bytes((ROOT / "tests/live_bank.bin").read_bytes()), {"1A": "Limpio ñ"}, {"1": "Rock"},
+                         amps={"3": "RANDALL Clean"})
     f = tmp_path / "doc.json"
     f.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
     r = subprocess.run(["node", str(ROOT / "tests/ui/cloud.test.mjs"), str(f)], capture_output=True, text=True,

@@ -287,7 +287,45 @@ class UploadDialog(StyledDialog):
         self.adjustSize()
 
 
-class AmpUploadDialog(StyledDialog):
+class _ModelJobDialog(StyledDialog):
+    """Progress, close and error handling shared by the AMP/CAB dialogs: the window can't be closed
+    while the job runs; after an error the inputs in `self.inputs` are enabled again."""
+
+    inputs: list = []
+
+    def progress(self, text: str, n: int, total: int) -> None:
+        if n >= 0:
+            self.bar.setRange(0, total)
+            self.bar.setValue(n)
+        self.status(self.step, text)
+
+    def reject(self) -> None:
+        if not self.running:
+            super().reject()
+
+    def finished(self, text: str) -> None:
+        self.running = False
+        self.bar.setRange(0, 1)
+        self.bar.setValue(1)
+        self.status(self.step, text, True)
+        self.go.hide()
+        self.close_btn.setText("Cerrar")
+        self.close_btn.setEnabled(True)
+
+    def failed(self, text: str) -> None:
+        self.running = False
+        self.status(self.step, text, False)
+        for w in (self.go, self.close_btn, *self.inputs):
+            w.setEnabled(True)
+
+    def _running(self, text: str) -> None:
+        self.running = True
+        for w in (self.go, self.close_btn, *self.inputs):
+            w.setEnabled(False)
+        self.status(self.step, text)
+
+
+class AmpUploadDialog(_ModelJobDialog):
     """Replace one of the 9 AMP models of the pedal with an .am4data file (Bluetooth only)."""
 
     def __init__(self, main, data: bytes, name: str):
@@ -322,6 +360,7 @@ class AmpUploadDialog(StyledDialog):
         self.status(self.step, "Requiere la pedalera encendida con Bluetooth y libre (sin la app del teléfono).")
         self.close_btn = self.button("Cancelar", self.reject)
         self.go = self.button("Subir a la pedalera", self._start, "primary")
+        self.inputs = [self.slot, self.name]
 
     def _start(self) -> None:
         slot = self.slot.currentIndex()
@@ -330,38 +369,10 @@ class AmpUploadDialog(StyledDialog):
                    "¿Continuar?"):
             return
         if self.main.start_amp_upload(slot, self.data, self.name.text().strip() or f"AMP {slot + 1}", self):
-            self.running = True
-            for w in (self.go, self.close_btn, self.slot, self.name):
-                w.setEnabled(False)
-            self.status(self.step, "Conectando por Bluetooth…")
-
-    def progress(self, text: str, n: int, total: int) -> None:
-        if n >= 0:
-            self.bar.setRange(0, total)
-            self.bar.setValue(n)
-        self.status(self.step, text)
-
-    def reject(self) -> None:
-        if not self.running:
-            super().reject()
-
-    def finished(self, text: str) -> None:
-        self.running = False
-        self.bar.setRange(0, 1)
-        self.bar.setValue(1)
-        self.status(self.step, text, True)
-        self.go.hide()
-        self.close_btn.setText("Cerrar")
-        self.close_btn.setEnabled(True)
-
-    def failed(self, text: str) -> None:
-        self.running = False
-        self.status(self.step, text, False)
-        for w in (self.go, self.close_btn, self.slot, self.name):
-            w.setEnabled(True)
+            self._running("Conectando por Bluetooth…")
 
 
-class FactoryAmpCabDialog(StyledDialog):
+class FactoryAmpCabDialog(_ModelJobDialog):
     """Put back the factory AMP and CAB models (and optionally the 36 presets) of set AM4 or AM3,
     like "restore" in M-EFCS (Bluetooth only)."""
 
@@ -395,6 +406,7 @@ class FactoryAmpCabDialog(StyledDialog):
         self.status(self.step, "Requiere la pedalera encendida con Bluetooth y libre (sin la app del teléfono).")
         self.close_btn = self.button("Cancelar", self.reject)
         self.go = self.button("Restaurar", self._start, "primary")
+        self.inputs = [self.presets, *self.kinds]
 
     def kind(self) -> str:
         return next(k for k, b in zip(self.keys, self.kinds) if b.isChecked())
@@ -406,20 +418,7 @@ class FactoryAmpCabDialog(StyledDialog):
                    f"{library.FACTORY_SETS[kind]}.\n¿Continuar?"):
             return
         if self.main.start_factory_ampcab(kind, presets, self):
-            self.running = True
-            for w in (self.go, self.close_btn, self.presets, *self.kinds):
-                w.setEnabled(False)
-            self.status(self.step, "Conectando por Bluetooth…")
-
-    progress = AmpUploadDialog.progress
-    reject = AmpUploadDialog.reject
-    finished = AmpUploadDialog.finished
-
-    def failed(self, text: str) -> None:
-        self.running = False
-        self.status(self.step, text, False)
-        for w in (self.go, self.close_btn, self.presets, *self.kinds):
-            w.setEnabled(True)
+            self._running("Conectando por Bluetooth…")
 
 
 class ArtistLibrary(StyledDialog):
