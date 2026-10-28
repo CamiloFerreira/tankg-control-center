@@ -47,6 +47,8 @@ def env(tmp_path):
     assert wait(lambda: w.device is not None and not w.busy)
     yield w, pedal, wait, messages
     w.live_timer.stop()
+    w._cloud_started = True   # its delayed startup sync must not run during later tests
+    w.cloud_timer.stop()
     for d in app.topLevelWidgets():
         d.close()
     for p in patches:
@@ -182,7 +184,8 @@ def test_cloud_autosync_edits_and_loads_newer_at_start(env, tmp_path, monkeypatc
     library.Settings().set_cloud({"refresh_token": "r"})
     w._cloud_started = w._cloud_ready = False
     w.cloud_startup()   # empty cloud: this device starts it
-    assert wait(lambda: len(google.files) == 1 and not w._bg, 8)
+    assert wait(lambda: len(google.files) == 1 and not w._bg and "guardados" in w.cloud_label.text(), 8)
+    w.cloud_label.clear()
     # any edit in the editor goes up by itself a moment later, without saving to the pedal
     p = w.local.presets[0].copy()
     p.set("gain", 21)
