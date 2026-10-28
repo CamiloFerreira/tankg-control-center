@@ -619,7 +619,7 @@ def test_factory_ampcab_restore():
         image = library.factory_ampcab(kind)
         assert len(image) == 0x34000
         assert library.factory_bank(kind) is not None
-        assert (ROOT / f"android/ui/factory/tankG_{kind}_ampCab.bin").read_bytes() == image   # same file in the APK
+        assert (ROOT / f"android/ui/factory/tankG_{library.FACTORY_AMPCAB[kind]}_ampCab.bin").read_bytes() == image   # same file in the APK
     image = library.factory_ampcab("am4")
     pedal = FakeBlePedal(LIVE)
     steps = []
@@ -634,11 +634,20 @@ def test_factory_ampcab_restore():
 
 def test_factory_set_setting(tmp_path, monkeypatch):
     monkeypatch.setattr(library, "SETTINGS_FILE", tmp_path / "s.json")
-    assert library.Settings().factory_set == "am4"
+    assert library.Settings().factory_set == "original"   # as it comes out of the box
     library.Settings().set_factory_set("am3")
     assert library.Settings().factory_set == "am3"
     if (ROOT / "research/factory/tankG_am3_preset.bin").exists():
         assert library.factory_bank().to_bytes() == library.factory_bank("am3").to_bytes() != library.factory_bank("am4").to_bytes()
+
+
+def test_original_factory_set_and_names():
+    original = (ROOT / "research/factory/tankG_original_preset.bin").read_bytes()
+    assert library.factory_bank("original").to_bytes() == original
+    assert original[:-2] == library.factory_bank("am3").to_bytes()[:-2]   # the AM3 presets, 9D's LED as the pedal keeps it
+    names = library.factory_names("original")
+    assert len(names["banks"]) == 9 and len(names["presets"]) == 36 and all(names["presets"].values())
+    assert library.factory_names("am3") == names and library.factory_names("am4") == {"banks": {}, "presets": {}}
 
 
 def test_aliases_keep_amp_names(tmp_path):

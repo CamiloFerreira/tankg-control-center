@@ -388,7 +388,7 @@ class TankG:
         candidates = [info] if info is not None else find_devices()
         if not candidates:
             raise DeviceError("No se encontró la Tank-G. ¿Está conectada por USB y encendida? "
-                              "Si lo está, elige el puerto en Pedalera → Puerto MIDI…")
+                              "Si lo está, elige el puerto en ☰ Menú → Puerto MIDI…")
         error: DeviceError | None = None
         for cand in candidates:
             try:
@@ -413,7 +413,7 @@ class TankG:
         candidates = [DeviceInfo("ble", *saved)] if saved else scan_bluetooth()
         if not candidates:
             raise DeviceError("No se encontró la Tank-G por Bluetooth. Enciéndela, desconéctala de la app "
-                              "del teléfono y elígela en Pedalera → Puerto MIDI…")
+                              "del teléfono y elígela en ☰ Menú → Puerto MIDI…")
         return cls.open(candidates[0])
 
     def close(self) -> None:
@@ -493,11 +493,11 @@ class TankG:
     def upload_amp(self, slot: int, payload: bytes, progress=None) -> None:
         # The model upload was captured over Bluetooth only; its USB form is unknown.
         raise DeviceError("Subir modelos de AMP solo funciona con la pedalera conectada por Bluetooth "
-                          "(Pedalera → Puerto MIDI… → elige la Tank-G Bluetooth).")
+                          "(☰ Menú → Puerto MIDI… → elige la Tank-G Bluetooth).")
 
     def restore_ampcab(self, image: bytes, progress=None) -> None:
         raise DeviceError("Restaurar los AMP/CAB de fábrica solo funciona con la pedalera conectada por Bluetooth "
-                          "(Pedalera → Puerto MIDI… → elige la Tank-G Bluetooth).")
+                          "(☰ Menú → Puerto MIDI… → elige la Tank-G Bluetooth).")
 
     def write_presets(self, target: Bank, slots: list[int], progress=None) -> Bank:
         """Write the given slots, then read back and verify. Returns the bank read back.

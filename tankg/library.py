@@ -26,8 +26,13 @@ BACKUP_DIR = DATA_DIR / "backups"
 ALIAS_FILE = DATA_DIR / "aliases.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 FACTORY_DIR = PROJECT_ROOT / "research/factory"
-# The two factory sets of M-EFCS ("AM4" newer models, "AM3"): 36 presets + the AMP/CAB models image.
-FACTORY_SETS = {"am4": "AM4", "am3": "AM3"}
+# Factory sets: 36 presets + the AMP/CAB models image. "original" is the pedal as it comes out of the
+# box (M-EFCS "factory" restore read back from the pedal on 2026-10-28: the AM3 presets, 9D's LED as the
+# pedal keeps it) and is the default; "am4"/"am3" are the two sets inside M-EFCS.
+FACTORY_SETS = {"original": "Original (de caja)", "am4": "AM4 (modelos nuevos)", "am3": "AM3"}
+FACTORY_AMPCAB = {"original": "am3", "am4": "am4", "am3": "am3"}   # AMP/CAB image of each set (original: inferred)
+FACTORY_NAMES = {"original": "original", "am3": "original"}         # names file of each set (same presets)
+DEFAULT_FACTORY_SET = "original"
 FACTORY_CANDIDATES = [
     DATA_DIR / "factory.tgbank",
     FACTORY_DIR / "tankG_am4_preset.bin",
@@ -109,7 +114,7 @@ def list_backups() -> list[Path]:
 
 
 def factory_bank(kind: str | None = None) -> Bank | None:
-    """Factory presets of `kind` ("am4"/"am3"; default: the set last restored, see Settings)."""
+    """Factory presets of `kind` (FACTORY_SETS; default: the set last restored, see Settings)."""
     kind = kind or Settings().factory_set
     for p in FACTORY_CANDIDATES if kind == "am4" else [FACTORY_DIR / f"tankG_{kind}_preset.bin"]:
         if p.exists():
@@ -123,10 +128,20 @@ def factory_bank(kind: str | None = None) -> Bank | None:
 def factory_ampcab(kind: str) -> bytes | None:
     """Factory image of the 9 AMP and 8 CAB models (212992 bytes) of set `kind`."""
     try:
-        data = (FACTORY_DIR / f"tankG_{kind}_ampCab.bin").read_bytes()
+        data = (FACTORY_DIR / f"tankG_{FACTORY_AMPCAB.get(kind, kind)}_ampCab.bin").read_bytes()
     except OSError:
         return None
     return data if len(data) == 0x34000 else None
+
+
+def factory_names(kind: str | None = None) -> dict:
+    """{"banks": {"1": name}, "presets": {"1A": name}} of a factory set (empty when it has none)."""
+    kind = kind or Settings().factory_set
+    try:
+        doc = _read_json(FACTORY_DIR / f"tankG_{FACTORY_NAMES[kind]}_names.json")
+    except (KeyError, OSError, ValueError):
+        return {"banks": {}, "presets": {}}
+    return {"banks": dict(doc.get("banks") or {}), "presets": dict(doc.get("presets") or {})}
 
 
 class ModelStore:
@@ -318,9 +333,10 @@ class Settings:
 
     @property
     def factory_set(self) -> str:
-        """Factory set ("am4"/"am3") last restored on the pedal; the editor's factory presets follow it."""
+        """Factory set last restored on the pedal (default: as it comes out of the box); the editor's
+        factory presets follow it."""
         kind = self.data.get("factory_set")
-        return kind if kind in FACTORY_SETS else "am4"
+        return kind if kind in FACTORY_SETS else DEFAULT_FACTORY_SET
 
     def set_factory_set(self, kind: str) -> None:
         self.data["factory_set"] = kind

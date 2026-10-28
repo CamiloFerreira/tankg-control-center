@@ -192,3 +192,11 @@ idénticas a `tankG_am4_ampCab.bin` y `tankG_am3_ampCab.bin`. "Restaurar todo" d
 y el preset en edición (space 1).
 
 Por USB: forma de estos comandos DESCONOCIDA (no se implementa).
+
+## 10. Estado de caja (2026-10-28)
+
+- Tras «restaurar de fábrica» en M-EFCS, la lectura del banco por USB (`research/factory/tankG_original_preset.bin`) es
+  idéntica a `tankG_am3_preset.bin` salvo los bytes 756–757 (LED de 9D: `00 00` en la pedalera). [VERIFICADO]
+- Qué imagen AMP/CAB escribió M-EFCS en esa restauración no quedó en los logs: se asume AM3 (`FACTORY_AMPCAB`). [INFERIDO]
+- Los nombres de bancos y presets de `tankG_original_names.json` son nuestros (la pedalera no guarda nombres),
+  pensados a partir del AMP/CAB/efectos de cada preset.

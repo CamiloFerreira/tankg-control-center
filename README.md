@@ -16,9 +16,9 @@ class-compliant: no necesita drivers) y, en la Tank-G v2, por **Bluetooth**.
 |---|---|---|
 | ![Biblioteca](docs/img/desktop-library.png) | ![IA](docs/img/desktop-ai.png) | ![Subida](docs/img/desktop-upload.png) |
 
-| Android: pedalera | Biblioteca | Crear con IA | Menú |
-|---|---|---|---|
-| ![](docs/img/android-pedal.png) | ![](docs/img/android-library-bank.png) | ![](docs/img/android-ai.png) | ![](docs/img/android-menu.png) |
+| Android: pedalera | Menú con buscador | Buscar «amp» | Packs de bandas con AMP | Crear con IA |
+|---|---|---|---|---|
+| ![](docs/img/android-pedal.png) | ![](docs/img/android-menu.png) | ![](docs/img/android-menu-search.png) | ![](docs/img/android-library-packs.png) | ![](docs/img/android-ai.png) |
 
 ![Android en tablet](docs/img/android-tablet.png)
 
@@ -69,7 +69,7 @@ release sale sin firmar.
 Datos (backups y nombres) en `%APPDATA%\tankg\`.
 
 Si no detecta la pedalera (el nombre del puerto MIDI varía entre equipos Windows): menú
-**Pedalera → Puerto MIDI…**, elige entrada y salida, «Probar» y «Guardar». Desde la línea de
+**☰ Menú → Puerto MIDI / Bluetooth…**, elige entrada y salida, «Probar» y «Guardar». Desde la línea de
 comandos: `TankG ports` lista los puertos y `TankG ports --in "NOMBRE" --out "NOMBRE"` los fija.
 
 ## Uso
@@ -101,8 +101,11 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
   tiene su interruptor ON/OFF. Las perillas de 3 tramos muestran el tipo aproximado.
 - Abajo: interruptores D/AMP, C/MOD, B/DELAY, A/REVERB, BANK −/+ y el display. Pulsar un
   interruptor selecciona el preset y lo activa en la pedalera.
-- Barra: «Leer pedalera», «Guardar cambios (N)», «Deshacer», «Biblioteca de sonidos», «Crear con IA»
+- Barra: «☰ Menú», «Leer pedalera», «Guardar cambios (N)», «Deshacer», «Biblioteca de sonidos», «Crear con IA»
   y «Escucha en vivo». Sobre el panel: «LED» (color), «Revertir» y «Guardar preset».
+- **☰ Menú** (Ctrl+Shift+P): un panel que se abre sobre el editor, igual que en Android, con todas las
+  acciones agrupadas (Pedalera, Editar, Sonidos, Fábrica y modelos, Archivos, Nube, Ayuda), accesos rápidos
+  arriba y un buscador («guardar», «nube», «fábrica», «amp»…). No hay barra de menús.
 - Lista de presets: doble clic activa el preset en la pedalera; clic derecho abre todo lo que se
   puede hacer con un preset (guardar, copiar/pegar, duplicar, intercambiar, renombrar, fábrica…).
 - Nombres (solo en la app, la pedalera no guarda nombres): escribe el nombre del preset junto
@@ -119,11 +122,20 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
   alternativo, blues y más. Aplica uno al preset seleccionado o carga los 4 en un banco; con la
   pedalera conectada se suben al momento. Son aproximaciones de oído: ajusta gain y volumen.
 - Fábrica: restaurar el preset, el banco actual o los 36 presets de fábrica (se cargan en el
-  editor; «Guardar» los pasa a la pedalera).
-- Compartir: Archivo → Exportar/Importar banco (`.tgset`, 4 presets con sus nombres), además
+  editor; «Guardar» los pasa a la pedalera). Por defecto es el set **«Original (de caja)»**: los presets
+  tal como vienen en una pedalera nueva, con nombre para cada banco (Esenciales, Limpios y crunch, Rock
+  clásico, Texturas, Vintage, Metal, Blues rock, Británicos, Solos y potencia) y cada preset. También
+  están los sets AM4 y AM3 de M-EFCS.
+- **Modelos de AMP** (Tank-G v2, Bluetooth): subir un `.am4data` a uno de los 9 TYPE de AMP y volver a
+  los AMP/CAB de fábrica. **Packs de bandas** (☰ Menú → Sonidos, o el grupo «★ Con AMP importado» de la
+  Biblioteca): 11 bancos con el ampli de cada banda; los modelos son capturas de la comunidad de M-VAVE
+  que se descargan de su publicación original, con crédito a su autor. Si un preset necesita un AMP que
+  ya no está en la pedalera, el editor lo avisa y ofrece subirlo. Los packs propios se guardan como
+  `.tgpack` (presets + sus modelos).
+- Compartir: ☰ Menú → Archivos → Exportar/Importar banco (`.tgset`, 4 presets con sus nombres), además
   de presets sueltos (`.tgpreset`) y bancos completos (`.tgbank`).
-- Pedalera → Gestor de backups: lista de copias con fecha y diferencias; cargar o comparar.
-- Pedalera → Asistente de calibración: toma una referencia, guardas desde la pedalera en modo
+- ☰ Menú → Gestor de backups: lista de copias con fecha y diferencias; cargar o comparar.
+- ☰ Menú → Asistente de calibración: toma una referencia, guardas desde la pedalera en modo
   LIVE tras mover una perilla y muestra qué byte cambió (anota en `calibration.log`).
 - **✨ Crear con IA** (cabecera del preset o Ctrl+K): describes el sonido con tus palabras
   («crunch tipo AC/DC», «limpio con chorus de los 80», «solo de Gilmour») y una IA rellena todos
@@ -138,7 +150,7 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
 - Cada subida muestra una ventana de progreso («Subiendo 2 de 4 · 1B»), relee la pedalera
   para verificar y se cierra sola al terminar; si algo falla, el error queda a la vista.
 - «Escucha en vivo»: cada cambio se guarda en la pedalera y se activa el preset para oírlo.
-- **Nube (Google Drive):** menú Nube → «Conectar con Google Drive»: la app copia un código y abre
+- **Nube (Google Drive):** ☰ Menú → Nube → «Conectar con Google Drive»: la app copia un código y abre
   google.com/device; lo pegas, eliges tu cuenta y pulsas «Permitir» (igual en PC y Android). Desde entonces cada guardado en la pedalera
   se sube solo, y al abrir la app en otro equipo pregunta si cargar los presets más nuevos. Guarda
   presets, nombres y un historial de 30 versiones en la carpeta «Tank-G Control Center» de tu Drive
@@ -165,7 +177,7 @@ Se compila sin Gradle (aapt2 + javac + d8 + apksigner). La clave de firma se cre
 actualizaciones firmadas con la misma clave. La interfaz está en `android/ui/`; los datos de presets
 se generan con `tools/export_ui.py`.
 
-**Bluetooth en Windows/Linux (Tank-G v2):** Pedalera → Puerto MIDI… → «Bluetooth» → Buscar, elige la
+**Bluetooth en Windows/Linux (Tank-G v2):** ☰ Menú → Puerto MIDI / Bluetooth… → «Bluetooth» → Buscar, elige la
 pedalera y Guardar. Se usa cuando no hay una conectada por USB. La pedalera acepta una sola conexión:
 cierra la app del teléfono antes.
 

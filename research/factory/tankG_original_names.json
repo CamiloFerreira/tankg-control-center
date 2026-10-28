@@ -1,0 +1,16 @@
+{
+ "note": "Nombres de los presets de fábrica «de caja» (restaurados con M-EFCS el 2026-10-28 y leídos de la pedalera). La pedalera no guarda nombres: estos son de la app, según lo que suena cada preset.",
+ "banks": {"1": "Esenciales", "2": "Limpios y crunch", "3": "Rock clásico", "4": "Texturas", "5": "Vintage",
+           "6": "Metal", "7": "Blues rock", "8": "Británicos", "9": "Solos y potencia"},
+ "presets": {
+  "1A": "Limpio cristalino", "1B": "Lead suave", "1C": "Metal con gate", "1D": "Distorsión con eco",
+  "2A": "Limpio oscuro", "2B": "Limpio con sala", "2C": "Overdrive TS", "2D": "Crunch británico",
+  "3A": "Limpio con chorus", "3B": "RAT grueso", "3C": "Rock con chorus", "3D": "Hard rock",
+  "4A": "Limpio con phaser", "4B": "Ambiente nube", "4C": "Blues saturado", "4D": "Fuzz espacial",
+  "5A": "Crunch Vox", "5B": "Limpio Mesa", "5C": "Trémolo vintage", "5D": "Phaser setentero",
+  "6A": "Directo sin ampli", "6B": "Drive suave", "6C": "Metal brillante", "6D": "Metal con eco",
+  "7A": "Limpio con muelle", "7B": "Blues con medios", "7C": "Crunch Guv'nor", "7D": "Lead Guv'nor",
+  "8A": "Limpio Hi-Fi", "8B": "Trémolo saturado", "8C": "Bluesbreaker", "8D": "Lead británico",
+  "9A": "Limpio brillante", "9B": "RAT al máximo", "9C": "Crunch con muelle", "9D": "Solo con eco"
+ }
+}

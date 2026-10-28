@@ -11,6 +11,15 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
+## Novedades (1.9.1)
+
+- **Valores de fábrica «Original (de caja)».** «Restaurar de fábrica» ahora deja los presets tal como vienen en
+  una pedalera nueva (leídos de la pedalera tras restaurarla con M-EFCS) y es la opción por defecto. AM4 y AM3
+  siguen disponibles.
+- **Nombres para los presets de fábrica.** Los 9 bancos y los 36 presets de fábrica tienen nombre (Esenciales,
+  Limpios y crunch, Rock clásico, Texturas, Vintage, Metal, Blues rock, Británicos, Solos y potencia), y se
+  ponen solos al restaurar un preset, un banco o todo.
+
 ## Novedades (1.9.0)
 
 - **Packs de bandas con AMP reales.** En la Biblioteca hay un grupo nuevo, **«★ Con AMP importado»**: 11 bancos

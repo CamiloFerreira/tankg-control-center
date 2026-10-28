@@ -598,7 +598,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(pedal, 1)
 
         note = QLabel("TYPE e IR CAB verificados · el resto de controles se deduce del manual "
-                      "(Pedalera → Asistente de calibración) · MASTER es global y no se guarda en el preset")
+                      "(☰ Menú → Asistente de calibración) · MASTER es global y no se guarda en el preset")
         note.setWordWrap(True)
         note.setStyleSheet("color: #7d8793; font-size: 11px;")
         lay.addWidget(note)
@@ -953,7 +953,7 @@ class MainWindow(QMainWindow):
         self.connected = bool(find_devices())
         if not self.connected and not self.statusBar().currentMessage():
             self.statusBar().showMessage("No se detecta la Tank-G. Si está conectada, elige el puerto en "
-                                         "Pedalera → Puerto MIDI…")
+                                         "☰ Menú → Puerto MIDI…")
         if self.connected != was:
             self.statusBar().showMessage("Tank-G conectada" if self.connected else "Tank-G desconectada", 4000)
             if self.connected and self.device is None:
@@ -1133,6 +1133,9 @@ class MainWindow(QMainWindow):
                 if self.local is not None:
                     self._push_undo()
                 self.device, self.local = after, after.copy()
+                self._factory_names(list(range(SLOTS)), kind)
+                for s in range(SLOTS):
+                    self.aliases.set_preset_amp(s, None)
             dialog.finished(f"Pedalera restaurada a fábrica {library.FACTORY_SETS[kind]} · backup previo: {Path(path).name}")
             self.statusBar().showMessage(f"AMP/CAB de fábrica {library.FACTORY_SETS[kind]} restaurados", 8000)
 
@@ -1435,6 +1438,7 @@ class MainWindow(QMainWindow):
         if factory is None:
             return
         self._push_undo()
+        self._factory_names(slots)
         for s in slots:
             self.local.presets[s] = factory.presets[s].copy()
             self.aliases.set_preset_amp(s, None)
@@ -1442,6 +1446,21 @@ class MainWindow(QMainWindow):
         self._schedule_live()
         self.statusBar().showMessage("Presets de fábrica cargados en el editor. «Guardar» los pasa a la pedalera.",
                                      6000)
+
+    def _factory_names(self, slots: list[int], kind: str | None = None) -> None:
+        """Names of the factory set for these slots (and their banks when restored whole)."""
+        names = library.factory_names(kind)
+        if not names["presets"]:
+            return
+        for s in slots:
+            self.aliases.presets[slot_name(s)] = names["presets"].get(slot_name(s), "")
+            if not self.aliases.presets[slot_name(s)]:
+                del self.aliases.presets[slot_name(s)]
+        for b in {s // 4 for s in slots if all(x in slots for x in range(s // 4 * 4, s // 4 * 4 + 4))}:
+            self.aliases.banks[str(b + 1)] = names["banks"].get(str(b + 1), "")
+            if not self.aliases.banks[str(b + 1)]:
+                del self.aliases.banks[str(b + 1)]
+        self.aliases.save()
 
     def factory_selected(self) -> None:
         self._restore_factory([self.current])

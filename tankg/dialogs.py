@@ -575,7 +575,7 @@ class AmpUploadDialog(_ModelJobDialog):
         self.slot.setCurrentIndex(current if slot is None else slot)
         lay.addWidget(self.slot)
         note = QLabel("Todos los presets que usan ese TYPE sonarán con el modelo nuevo. Para volver al original: "
-                      "Pedalera → Restaurar AMP/CAB de fábrica.")
+                      "☰ Menú → Restaurar AMP/CAB de fábrica.")
         note.setObjectName("hint")
         note.setWordWrap(True)
         lay.addWidget(note)
@@ -711,8 +711,7 @@ class FactoryAmpCabDialog(_ModelJobDialog):
                          "Borra los modelos subidos. Se envía por Bluetooth y tarda unos 40 segundos.", 560, 420)
         self.running = False
         _, lay = self.card("1", "Juego de fábrica")
-        row, self.kinds = self.segmented([f"{v} " + ("(modelos nuevos)" if k == "am4" else "(original)")
-                                          for k, v in library.FACTORY_SETS.items()], self)
+        row, self.kinds = self.segmented(list(library.FACTORY_SETS.values()), self)
         self.keys = list(library.FACTORY_SETS)
         self.kinds[self.keys.index(library.Settings().factory_set)].setChecked(True)
         lay.addLayout(row)

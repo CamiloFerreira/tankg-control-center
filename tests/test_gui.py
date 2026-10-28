@@ -363,3 +363,11 @@ def test_cloud_version_offers_missing_community_models(env):
         w.load_cloud(doc)
         assert wait(lambda: library.ModelStore().get(8) is not None)
     assert "Randall" in asked[0] and w.aliases.amp_sources == {"9": {"article": 7414, "file": "r.am4Data"}}
+
+
+def test_factory_restore_names_presets_and_whole_banks(env):
+    w, pedal, wait, messages = env
+    names = library.factory_names("original")
+    w._factory_names([0, 1, 2, 3, 4], "original")
+    assert w.aliases.preset(0) == names["presets"]["1A"] and w.aliases.preset(4) == names["presets"]["2A"]
+    assert w.aliases.bank(0) == names["banks"]["1"] and w.aliases.bank(1) == ""   # bank 2 only partly restored

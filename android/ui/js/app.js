@@ -2,7 +2,7 @@
 // `device` = last bank read from the pedal, `local` = working copy; "modified" = slots that
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
-import { AI, AMP_MODELS, BAND_PACKS, BYTE_NAMES, CAB_MODELS, FACTORY, FACTORY_SETS, FIELDS, ICONS, LEGAL, LIBRARY, MENU, QUICK, QUICK_LABEL,
+import { AI, AMP_MODELS, BAND_PACKS, BYTE_NAMES, CAB_MODELS, DEFAULT_FACTORY_SET, FACTORY, FACTORY_AMPCAB, FACTORY_NAMES, FACTORY_SETS, FIELDS, ICONS, LEGAL, LIBRARY, MENU, QUICK, QUICK_LABEL,
   RELEASES_REPO, VERSION } from "./data.js";
 import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 import { fromText as aiFromText, generate as generateAI, webPrompt, zoneGap } from "./ai.js";
@@ -858,7 +858,7 @@ async function restoreFactoryAmpCab() {
     for (const [kind, label] of Object.entries(FACTORY_SETS))
       for (const presets of [true, false]) {
         const b = document.createElement("button");
-        b.textContent = `${label}${kind === "am4" ? " (modelos nuevos)" : " (original)"} · ${presets ? "AMP/CAB y 36 presets" : "solo AMP/CAB"}`;
+        b.textContent = `${label} · ${presets ? "AMP/CAB y 36 presets" : "solo AMP/CAB"}`;
         b.onclick = () => { closeModal(); resolve({ kind, presets }); };
         box.append(b);
       }
@@ -875,7 +875,7 @@ async function restoreFactoryAmpCab() {
   $("mClose").disabled = true;
   const step = (text, cls = "") => { $("mStep").textContent = text; $("mStep").className = cls; };
   try {
-    const res = await fetch(`factory/tankG_${kind}_ampCab.bin`);
+    const res = await fetch(`factory/tankG_${FACTORY_AMPCAB[kind] || kind}_ampCab.bin`);
     if (!res.ok) throw new Error(`faltan los modelos de fábrica ${label}`);
     const image = new Uint8Array(await res.arrayBuffer());
     step("Backup previo del banco…");
@@ -892,6 +892,8 @@ async function restoreFactoryAmpCab() {
       if (S.local) pushUndo();
       S.device = after;
       S.local = after.copy();
+      factoryNames([...Array(SLOTS).keys()], kind);
+      aliases.presetAmps = {};
     }
     aliases.amps = {};
     aliases.ampSources = {};
@@ -1192,13 +1194,31 @@ function swapSlots(a, b) {
 }
 
 /** Factory set ("am4"/"am3") last restored on the pedal; the editor's factory presets follow it. */
-const factorySet = () => (FACTORY_SETS[store.get("tankg.factorySet", "am4")] ? store.get("tankg.factorySet", "am4") : "am4");
+const factorySet = () => (FACTORY_SETS[store.get("tankg.factorySet", DEFAULT_FACTORY_SET)] ? store.get("tankg.factorySet", DEFAULT_FACTORY_SET)
+  : DEFAULT_FACTORY_SET);
+
+/** Names of the factory set for these slots and their banks when restored whole (MainWindow._factory_names). */
+function factoryNames(slots, kind = factorySet()) {
+  const names = FACTORY_NAMES[kind];
+  if (!names || !Object.keys(names.presets).length) return;
+  for (const s of slots) {
+    const n = names.presets[slotName(s)];
+    if (n) aliases.presets[slotName(s)] = n; else delete aliases.presets[slotName(s)];
+  }
+  for (const b of new Set(slots.map(s => Math.floor(s / 4))))
+    if ([0, 1, 2, 3].every(i => slots.includes(b * 4 + i))) {
+      const n = names.banks[String(b + 1)];
+      if (n) aliases.banks[String(b + 1)] = n; else delete aliases.banks[String(b + 1)];
+    }
+  saveAliases();
+}
 const factoryHex = (kind = factorySet()) => FACTORY[kind];
 
 function restoreFactory(slots) {
   if (!factoryHex()) return info("Fábrica", "Esta versión no incluye el banco de fábrica.");
   const factory = Bank.fromBytes(fromHex(factoryHex()));
   pushUndo();
+  factoryNames(slots);
   for (const s of slots) S.local.presets[s] = Uint8Array.from(factory.presets[s]);
   for (const s of slots) delete (aliases.presetAmps || {})[slotName(s)];
   saveAliases();

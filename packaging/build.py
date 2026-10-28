@@ -18,7 +18,8 @@ args = [
     "--noconfirm",
     "--clean",
     "--paths", str(ROOT),
-    *[x for name in ("tankG_am4_preset.bin", "tankG_am3_preset.bin", "tankG_am4_ampCab.bin", "tankG_am3_ampCab.bin")
+    *[x for name in ("tankG_original_preset.bin", "tankG_original_names.json", "tankG_am4_preset.bin", "tankG_am3_preset.bin",
+                     "tankG_am4_ampCab.bin", "tankG_am3_ampCab.bin")
       for x in ("--add-data", f"{ROOT / 'research/factory' / name}{SEP}research/factory")],
     "--add-data", f"{ROOT / 'packaging/icon.png'}{SEP}packaging",
     *[x for f in sorted((ROOT / "packs").glob("*.tgpack")) for x in ("--add-data", f"{f}{SEP}packs")],
