@@ -11,7 +11,19 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
-## Novedades (1.8.0)
+## Novedades (1.8.1)
+
+- **Google Drive se sincroniza solo** (si lo conectaste en Nube → Conectar):
+  - Al abrir la app, el editor carga la última versión de la nube sin preguntar. Lo que sea distinto de la
+    pedalera queda como cambios sin guardar: la pedalera no cambia hasta que pulses «Guardar».
+  - Cada cambio en el editor (valores, nombres, restaurar de fábrica, guardar) se sube solo a los pocos
+    segundos. Abajo se ve el estado: «Guardando cambios en la nube…», «Cambios guardados en la nube».
+  - Se sincronizan los presets, los nombres de presets y bancos, y ahora también los nombres de los
+    modelos de AMP subidos.
+- **Corregido:** la ventana «Restaurar AMP/CAB de fábrica» no se podía cerrar (por ejemplo cuando no
+  encontraba la pedalera por Bluetooth).
+
+## Versión 1.8.0
 
 - **Subir modelos de AMP (.am4data)**, los mismos que descarga la app oficial M-EFCS: Pedalera →
   **Subir modelo de AMP** (en Android, menú). Eliges el archivo y cuál de los 9 AMP (perilla TYPE)
