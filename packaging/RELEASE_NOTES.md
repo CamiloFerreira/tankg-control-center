@@ -11,7 +11,19 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
-## Novedades (1.8.2)
+## Novedades (1.8.3)
+
+- **Menú nuevo con buscador en Windows, Linux y Android.** Escribe lo que buscas («guardar», «nube»,
+  «fábrica», «AMP»…) y aparece al instante; arriba, accesos rápidos (Leer, Guardar, Activar, En vivo,
+  Biblioteca, Crear con IA) y debajo todas las acciones agrupadas, con icono y una línea que explica
+  qué hace. Lo que no se puede usar en ese momento se ve atenuado.
+  - **Windows/Linux:** botón «☰ Menú» de la barra o **Ctrl+Shift+P**; Enter ejecuta la primera
+    coincidencia. La barra de menús de siempre sigue igual.
+  - **Android:** el menú ⋮. En tablets se abre como panel lateral sin tapar el editor.
+- **Corregido en Android:** el botón «atrás» a veces cerraba la app en vez de cerrar el menú o la ventana
+  abierta.
+
+## Versión 1.8.2
 
 - **Conectar con Google Drive sin salir de la app:** la ventana muestra el código y ya no abre el
   navegador sola. Escríbelo en **cualquier dispositivo** (el PC, otro teléfono o el mismo) en
