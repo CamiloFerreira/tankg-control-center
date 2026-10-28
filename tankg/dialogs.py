@@ -170,33 +170,33 @@ def ask(parent, title: str, text: str) -> bool:
 
 
 class CloudSignIn(StyledDialog):
-    """Google sign-in with a code (device flow): copies the code and opens google.com/device.
-    The main window polls Google in the background and closes this window when access is allowed."""
+    """Google sign-in with a code (device flow). The code can be entered on any device at
+    google.com/device; opening the browser here is optional. The main window polls Google in the
+    background and closes this window when access is allowed."""
 
     def __init__(self, main, code: dict):
         super().__init__(main, "Conectar con Google Drive",
                          "Tus presets y nombres se guardarán en tu Drive, en la carpeta «Tank-G Control Center».",
-                         width=560, height=380)
+                         width=560, height=400)
         self.code = code
-        _, lay = self.card("1", "Copia este código")
+        _, lay = self.card("1", "Tu código")
         big = QLabel(code["user_code"])
         big.setObjectName("dlgTitle")
         big.setStyleSheet("font-size: 34px; letter-spacing: 4px;")
         big.setAlignment(Qt.AlignCenter)
         big.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(big)
-        _, lay = self.card("2", "Pégalo en Google y pulsa «Permitir»")
-        hint = QLabel(f"Ya está copiado y se abrió {code['url']} en el navegador.\n"
-                      "Elige tu cuenta, pega el código y acepta: esta ventana se cerrará sola.")
+        _, lay = self.card("2", "Ingrésalo en Google desde cualquier dispositivo")
+        hint = QLabel(f"En el teléfono, la tablet o este equipo abre <b>{code['url'].replace('https://', '')}</b>, "
+                      "escribe el código, elige tu cuenta y pulsa «Permitir». Esta ventana se cerrará sola.")
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         lay.addWidget(hint)
         self.body.addStretch()
         self.button("Cancelar", self.reject)
         self.button("Copiar código", self.copy)
-        self.button("Abrir Google", self.open_google, "primary")
+        self.button("Abrir Google en este equipo", self.open_google, "primary")
         self.copy()
-        self.open_google()
 
     def copy(self) -> None:
         QApplication.clipboard().setText(self.code["user_code"])

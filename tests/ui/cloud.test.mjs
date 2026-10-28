@@ -6,12 +6,13 @@ import { webcrypto } from "node:crypto";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 const files = new Map(), folders = new Map();
-let nextId = 1;
+let nextId = 1, polls = 0;
 globalThis.AndroidMidi = {
   httpRequest(id, method, url, headersJson, body) {
     const headers = JSON.parse(headersJson);
     let status = 200, text = "{}";
     if (url.endsWith("/device/code")) text = JSON.stringify({ device_code: "d", user_code: "ABCD-EFGH", verification_url: "https://www.google.com/device", interval: 0, expires_in: 60 });
+    else if (url.endsWith("/token") && body.includes("device_code") && ++polls === 1) status = 0;   // no network in the background
     else if (url.endsWith("/token")) text = body.includes("device_code") ? '{"access_token":"a","refresh_token":"r","expires_in":3600}' : '{"access_token":"a2","expires_in":3600}';
     else {
       assert.ok(headers.Authorization.startsWith("Bearer "));
@@ -49,6 +50,9 @@ assert.equal(fromPy.banks["1"], "Rock"); assert.deepEqual(fromPy.amps, { 3: "RAN
 assert.equal("amps" in cloud.makeDoc(fromPy.bank, {}, {}, {}).aliases, false);   // like make_doc: only when there is one
 assert.deepEqual(cloud.parseDoc(cloud.makeDoc(fromPy.bank, {}, {}, { 1: "X" })).amps, { 1: "X" });
 
+const code = { deviceCode: "d", userCode: "ABCD-EFGH", url: "https://www.google.com/device", interval: 0, expiresIn: 60 };
+assert.equal(await cloud.finishSignIn(code), "r");   // the network error while waiting is retried
+assert.equal(polls, 2);
 const drive = new cloud.Drive("r");
 const bank = Bank.fromBytes(fromHex(pyDoc.bank));
 await cloud.push(drive, cloud.makeDoc(bank, { "1A": "Desde Android" }, { 1: "Rock" }));

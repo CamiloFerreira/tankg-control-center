@@ -677,7 +677,9 @@ class FakeGoogle:
             if form["grant_type"].endswith("device_code"):
                 assert form["device_code"] == "d"
                 self.polls += 1
-                if self.polls < 2:   # the user has not allowed it yet
+                if self.polls == 2:   # Android cuts the network while the user is in the browser
+                    raise cloud.NetworkError("Sin conexión con Google. ¿Hay internet?")
+                if self.polls < 3:   # the user has not allowed it yet
                     return 428, b'{"error": "authorization_pending"}'
                 return 200, b'{"access_token": "a", "refresh_token": "r", "expires_in": 3600}'
             return 200, b'{"access_token": "a2", "expires_in": 3600}'
@@ -724,8 +726,8 @@ def test_cloud_sign_in_push_pull_history(monkeypatch):
     monkeypatch.setattr(cloud.time, "sleep", lambda s: None)
     code = cloud.start_sign_in()
     assert code["user_code"] == "ABCD-EFGH" and code["url"] == "https://www.google.com/device"
-    token = cloud.finish_sign_in(code)
-    assert google.polls == 2
+    token = cloud.finish_sign_in(code)   # a network error while waiting does not end the sign-in
+    assert google.polls == 3
     with pytest.raises(cloud.CloudError):
         cloud.finish_sign_in(code, should_stop=lambda: True)
     assert token == "r"

@@ -14,6 +14,8 @@ export const LATEST = "tankg-cloud.json";
 const HISTORY_PREFIX = "tankg-history-", HISTORY_KEEP = 30, FORMAT = "tankg-cloud";
 
 export class CloudError extends Error {}
+/** Google could not be reached (transient: no network, app in the background). */
+export class NetworkError extends CloudError {}
 export const configured = () => !!(CLOUD.clientId && CLOUD.clientSecret);
 
 const pending = new Map();
@@ -34,7 +36,7 @@ const json = t => { try { return JSON.parse(t || "{}"); } catch { return {}; } }
 
 async function postForm(url, fields) {
   const r = await http("POST", url, { "Content-Type": "application/x-www-form-urlencoded" }, form(fields));
-  if (r.status === 0) throw new CloudError("Sin conexión con Google. ¿Hay internet?");
+  if (r.status === 0) throw new NetworkError("Sin conexión con Google. ¿Hay internet?");
   return { status: r.status, doc: json(r.text) };
 }
 
@@ -53,9 +55,21 @@ export async function finishSignIn(code, shouldStop = () => false) {
   let interval = code.interval;
   while (Date.now() < end) {
     if (shouldStop()) throw new CloudError("Inicio de sesión cancelado.");
-    await new Promise(r => setTimeout(r, interval * 1000));
-    const { status, doc } = await postForm("https://oauth2.googleapis.com/token", { client_id: CLOUD.clientId,
-      client_secret: CLOUD.clientSecret, device_code: code.deviceCode, grant_type: "urn:ietf:params:oauth:grant-type:device_code" });
+    await new Promise(r => {   // wait, but ask at once when the user comes back from the browser
+      const doc = globalThis.document;
+      const back = () => { if (doc.visibilityState === "visible") done(); };
+      const done = () => { clearTimeout(t); doc?.removeEventListener("visibilitychange", back); r(); };
+      const t = setTimeout(done, interval * 1000);
+      doc?.addEventListener("visibilitychange", back);
+    });
+    let status, doc;
+    try {
+      ({ status, doc } = await postForm("https://oauth2.googleapis.com/token", { client_id: CLOUD.clientId,
+        client_secret: CLOUD.clientSecret, device_code: code.deviceCode, grant_type: "urn:ietf:params:oauth:grant-type:device_code" }));
+    } catch (e) {
+      if (e instanceof NetworkError) continue;   // Android cuts the network of apps in the background
+      throw e;
+    }
     if (status === 200 && doc.refresh_token) return doc.refresh_token;
     if (doc.error === "authorization_pending") continue;
     if (doc.error === "slow_down") { interval += 5; continue; }
@@ -85,7 +99,7 @@ export class Drive {
     if (type) headers["Content-Type"] = type;
     if (method === "PATCH") { method = "POST"; headers["X-HTTP-Method-Override"] = "PATCH"; }   // HttpURLConnection has no PATCH
     const r = await http(method, url, headers, body);
-    if (r.status === 0) throw new CloudError("Sin conexión con Google. ¿Hay internet?");
+    if (r.status === 0) throw new NetworkError("Sin conexión con Google. ¿Hay internet?");
     if (r.status >= 400) throw new CloudError(`Google Drive respondió: ${json(r.text).error?.message || r.status}`);
     return r.text;
   }

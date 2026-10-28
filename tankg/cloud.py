@@ -46,6 +46,10 @@ class CloudError(Exception):
     """Error with a message meant for the user."""
 
 
+class NetworkError(CloudError):
+    """Google could not be reached (transient: no network, timeout)."""
+
+
 def configured() -> bool:
     return bool(CLIENT_ID and CLIENT_SECRET)
 
@@ -64,7 +68,7 @@ def _request(method: str, url: str, data: bytes | None = None, headers: dict | N
     except urllib.error.HTTPError as e:
         return e.code, e.read()
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise CloudError(f"Sin conexión con Google ({e}). ¿Hay internet?") from e
+        raise NetworkError(f"Sin conexión con Google ({e}). ¿Hay internet?") from e
 
 
 def _form(url: str, fields: dict) -> tuple[int, dict]:
@@ -99,9 +103,12 @@ def finish_sign_in(code: dict, should_stop=lambda: False) -> str:
             if should_stop():
                 raise CloudError("Inicio de sesión cancelado.")
             time.sleep(0.1)
-        status, doc = _form(TOKEN_URL, {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
-                                        "device_code": code["device_code"],
-                                        "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
+        try:
+            status, doc = _form(TOKEN_URL, {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
+                                            "device_code": code["device_code"],
+                                            "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
+        except NetworkError:   # e.g. no network while the user is in the browser: keep waiting
+            continue
         if status == 200 and doc.get("refresh_token"):
             return doc["refresh_token"]
         if doc.get("error") == "authorization_pending":

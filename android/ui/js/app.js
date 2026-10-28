@@ -1226,12 +1226,14 @@ async function cloudConnect() {
   let code;
   try { code = await cloud.startSignIn(); } catch (e) { return info("Nube", e.message); }
   let cancelled = false;
-  modal({ title: "Conectar con Google Drive", step: `1. Se abrirá Google: pega el código (ya está copiado)\n2. Elige tu cuenta y pulsa «Permitir»\n\nCódigo: ${code.userCode}`,
-    ok: "Abrir Google", cancel: "Cancelar" });
+  // The code can be entered on any device: opening the browser here is optional (some tablets cut the
+  // network of an app in the background while the browser is in front).
+  modal({ title: "Conectar con Google Drive", step: `Código: ${code.userCode}\n\n1. En cualquier dispositivo (el PC, otro teléfono o este) `
+    + `abre ${code.url.replace("https://", "")} y escribe el código (ya está copiado)\n2. Elige tu cuenta y pulsa «Permitir»\n\n`
+    + "Esta ventana se cerrará sola.", ok: "Abrir Google aquí", cancel: "Cancelar" });
   A.copyText(code.userCode);
   $("mOk").onclick = () => A.openUrl(code.url);
   $("mClose").onclick = () => { cancelled = true; closeModal(); };
-  A.openUrl(code.url);
   try {
     const token = await cloud.finishSignIn(code, () => cancelled);
     setCloud({ refreshToken: token });
