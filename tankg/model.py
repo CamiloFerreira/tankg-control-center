@@ -73,6 +73,18 @@ def zone_of(field: Field, value: int) -> str:
     return field.zones[min(2, value * 3 // (field.maximum + 1))]
 
 
+def zone_span(zone: int) -> tuple[int, int]:
+    """Knob range that clearly selects zone 0-2, leaving out the dead spots around the limits
+    (equal thirds and the dead-spot width are assumptions, unverified)."""
+    return zone * 128 // 3 + 4, (zone + 1) * 128 // 3 - 5
+
+
+def zone_gap(field: Field, value: int) -> bool:
+    """True between two zones of a three-zone knob, where the manual says the module is off
+    (values 38-45 and 81-88 with the assumed limits)."""
+    return bool(field.zones) and any(zone_span(z)[1] < value < zone_span(z + 1)[0] for z in (0, 1))
+
+
 def slot_name(slot: int) -> str:
     """0 -> '1A', 35 -> '9D' (bank = slot // 4 + 1, letter = ABCD[slot % 4])."""
     if not 0 <= slot < SLOTS:

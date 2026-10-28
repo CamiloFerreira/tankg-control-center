@@ -136,6 +136,8 @@ MASTER es global.
 | 18–20 | color LED R, G, B (fábrica `ff 00 00`) | INFERIDO |
 
 Límites de los 3 tramos: se asumen tercios iguales (sin calibrar).
+Zona muerta entre tramos (manual: ahí el módulo se apaga y sus luces también): la app asume 38–45 y
+81–88 (`model.zone_span`/`zone_gap`; la IA nunca pone valores ahí) [INFERIDO, ancho sin calibrar].
 Calibración propuesta: en modo LIVE mover una sola perilla, guardar (mantener A/B/C/D) en un slot,
 leer el banco y comparar con el backup.
 

@@ -4,7 +4,7 @@
 // verifies by read-back.
 import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FIELDS, LEGAL, LIBRARY, RELEASES_REPO, VERSION } from "./data.js";
 import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
-import { fromText as aiFromText, generate as generateAI, webPrompt } from "./ai.js";
+import { fromText as aiFromText, generate as generateAI, webPrompt, zoneGap } from "./ai.js";
 import { parseBankFile, parsePresetFile, parseSetFile, presetFile, setFile, stamp } from "./files.js";
 import * as cloud from "./cloud.js";
 
@@ -149,7 +149,7 @@ function paintFader(el, v) {
   el.querySelector(".fill").style.height = `${pct}%`;
   el.querySelector(".thumb").style.bottom = `calc(${pct}% - 11px)`;
   el.querySelector("output").textContent = v;
-  el.querySelector(".zone").textContent = zoneOf(f, v);
+  el.querySelector(".zone").textContent = zoneGap(f, v) ? "APAGADO" : zoneOf(f, v);
   el.querySelector(".track").setAttribute("aria-valuenow", v);
 }
 
@@ -200,7 +200,9 @@ function render() {
     const el = document.querySelector(`.${m.cls}`);
     const on = m.sw ? !!get(m.sw) : m.select === "cab" ? get("cab") > 0 : get("gate") > 0;
     el.classList.toggle("off", !on);
-    for (const led of el.querySelectorAll(".led")) led.classList.toggle("on", on);
+    // like on the pedal, the knob lights go off when a three-zone knob sits between two zones
+    const lit = on && !m.faders.some(k => zoneGap(F[k], get(k)));
+    for (const led of el.querySelectorAll(".led")) led.classList.toggle("on", lit);
     const sw = el.querySelector(".switch");
     if (sw) { sw.textContent = on ? "ON" : "OFF"; sw.classList.toggle("on", on); }
     const sel = el.querySelector("select");

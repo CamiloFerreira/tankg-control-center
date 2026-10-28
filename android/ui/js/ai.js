@@ -8,9 +8,15 @@ export class AIError extends Error {}
 
 const clamp = (key, v) => Math.max(0, Math.min(F[key].max, Math.trunc(Number(v)) || 0));
 
+/** Range that clearly selects zone 0-2, without the dead spots (same as model.zone_span). */
+export const zoneSpan = zone => [Math.floor((zone * 128) / 3) + 4, Math.floor(((zone + 1) * 128) / 3) - 5];
+
+/** Between two zones of a three-zone knob the module is off (same as model.zone_gap). */
+export const zoneGap = (f, v) => f.zones.length > 0 && [0, 1].some(z => zoneSpan(z)[1] < v && v < zoneSpan(z + 1)[0]);
+
 /** Knob position inside one third of a three-zone knob (same as ai._zone_value). */
 export function zoneValue(zone, amount) {
-  const lo = Math.floor((zone * 128) / 3) + 4, hi = Math.floor(((zone + 1) * 128) / 3) - 5;
+  const [lo, hi] = zoneSpan(zone);
   const a = Math.max(0, Math.min(100, amount));
   return lo + pyRound((a * (hi - lo)) / 100);
 }

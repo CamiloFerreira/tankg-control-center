@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from . import cloud, dialogs, library, theme, updater
 from .version import PRIVACY_URL, TERMS_URL, __version__
 from .device import DeviceError, TankG, find_devices
-from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_of
+from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_gap, zone_of
 
 SECTION_COLORS = {
     "gate": "#f2f2f2", "amp": "#ff5a36", "mod": "#ffb627",
@@ -176,7 +176,8 @@ class Knob(QWidget):
         self.zone.setVisible(bool(self.field.zones))
         if self.field.zones:
             self.zone.setToolTip("Tipo aproximado: la perilla se divide en 3 tramos "
-                                 f"({' / '.join(self.field.zones)}). Límites exactos sin calibrar.")
+                                 f"({' / '.join(self.field.zones)}). Entre dos tramos el módulo se "
+                                 "apaga (manual). Límites exactos sin calibrar.")
         lay.addWidget(self.led, 0, Qt.AlignHCenter)
         lay.addWidget(label)
         lay.addWidget(self.slider, 1, Qt.AlignHCenter)
@@ -194,7 +195,7 @@ class Knob(QWidget):
 
     def _update_zone(self, v: int) -> None:
         if self.field.zones:
-            self.zone.setText("≈ " + zone_of(self.field, v))
+            self.zone.setText("≈ APAGADO" if zone_gap(self.field, v) else "≈ " + zone_of(self.field, v))
 
     def _from_slider(self, v: int) -> None:
         if not self._loading:
@@ -292,14 +293,16 @@ class Section(QFrame):
             if on else
             "background: #0e2b2a; color: #6c8f8e; border-radius: 6px; font-weight: bold; padding: 0; font-size: 11px;")
 
-    def set_on(self, on: bool) -> None:
+    def set_on(self, on: bool, lit: bool | None = None) -> None:
+        """`on` is the module byte; `lit` (default `on`) drives the knob lights, which go off
+        when a three-zone knob sits between two zones, like on the pedal."""
         if self.switch:
             self.switch.blockSignals(True)
             self.switch.setChecked(on)
             self.switch.blockSignals(False)
             self._style_switch(on)
         for c in self.controls:
-            c.led.set_on(on)
+            c.led.set_on(on if lit is None else lit)
 
 
 def two_lines(text: str, width: int = 9) -> str:
@@ -767,7 +770,8 @@ class MainWindow(QMainWindow):
                 on = p is not None and p.get("gate") > 0
             if s.section == "cab":
                 on = p is not None and p.get("cab") > 0
-            s.set_on(on)
+            gap = p is not None and any(zone_gap(c.field, p.get(c.field.key)) for c in s.controls)
+            s.set_on(on, on and not gap)
         if p is not None:
             r, g, b = p.color
             text = "#111" if (r * 299 + g * 587 + b * 114) / 1000 > 140 else "#fff"

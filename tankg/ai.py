@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, Preset
+from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, Preset, zone_span
 
 # Browser mode: no API key, the user pastes the prompt in a chat web page and copies the answer.
 WEB_SITES = {
@@ -283,7 +283,7 @@ class AIConfig:
 def _zone_value(zone: int, amount: int) -> int:
     """Knob position inside one third of a three-zone knob, keeping clear of the dead spots
     between zones (zone limits assumed to be equal thirds, unverified)."""
-    lo, hi = zone * 128 // 3 + 4, (zone + 1) * 128 // 3 - 5
+    lo, hi = zone_span(zone)
     return lo + round(max(0, min(100, amount)) * (hi - lo) / 100)
 
 

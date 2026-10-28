@@ -317,6 +317,16 @@ def test_ai_apply_design_zones_and_clamping():
     assert p.get("rvb_mix") == 127 and p.get("mod_on") == 0 and p.get("dly_on") == 1
 
 
+def test_zone_gap_between_zones_only():
+    from tankg import ai
+    from tankg.model import FIELD_BY_KEY, zone_gap
+    mod = FIELD_BY_KEY["mod_fx"]
+    assert [v for v in range(128) if zone_gap(mod, v)] == [*range(38, 46), *range(81, 89)]
+    assert not any(zone_gap(FIELD_BY_KEY["gain"], v) for v in range(128))
+    # AI designs never land in a dead spot
+    assert not any(zone_gap(mod, ai._zone_value(z, a)) for z in range(3) for a in range(101))
+
+
 def test_ai_claude_request(monkeypatch):
     from tankg import ai
     seen = {}
