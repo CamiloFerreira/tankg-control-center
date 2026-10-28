@@ -11,6 +11,7 @@ QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
 from tankg import artists, dialogs, gui, library  # noqa: E402
 from tankg.device import TankG  # noqa: E402
+from tankg.model import Bank  # noqa: E402
 from test_tankg import LIVE, FakePedal  # noqa: E402
 
 
@@ -262,3 +263,103 @@ def test_command_menu_covers_every_command_and_searches(env):
     assert rows["cloudConnect"].property("available") and not rows["cloudPush"].property("available")
     w.toggle_menu()
     assert w.command_menu is None
+
+
+def test_pack_import_uploads_models_then_presets(env, tmp_path):
+    """A bank pack with one AMP model: the model goes to the chosen slot over Bluetooth, the presets
+    that used it are remapped, then written and verified; names and the model copy are kept."""
+    from tankg import pack
+    from tankg.device import TankGBle
+    from test_tankg import AM4_FIXTURE, FakeBlePedal
+    w, _, wait, messages = env
+    src = w.local.copy()
+    src.presets[0].raw[5] = 2
+    doc, _ = pack.make(src, [0, 1, 2, 3], {0: "Con AMP"}, {"1": "Pack"}, {"3": "Mi AMP"}, {2: AM4_FIXTURE[:7868]}, "Pack")
+    loaded = pack.parse(doc)
+    ble = FakeBlePedal(LIVE)
+
+    def open_ble():
+        dev = TankGBle(ble)
+        dev.bank = dev.read_bank()
+        return dev
+
+    store_dir = tmp_path / "amps"
+    with mock.patch.object(gui.TankG, "open_bluetooth", staticmethod(open_ble)), \
+            mock.patch.object(library.ModelStore, "__init__", lambda self, folder=None: setattr(self, "folder", store_dir)):
+        d = dialogs.PackImportDialog(w, loaded)
+        d.show()
+        d.dest.setCurrentIndex(2)            # bank 3
+        d.amp_slots[0].setCurrentIndex(5)    # the model to AMP 6 instead of 3
+        d._start()
+        assert wait(lambda: not w.busy, 10)
+        assert not d.running and "importado" in d.step.text() and not messages
+        assert ble.amps == {5: AM4_FIXTURE}                       # uploaded with its LMT block, to slot 6
+        written = Bank.from_bytes(bytes(ble.mem))
+        assert written.presets[8].amp == 5                        # remapped: AMP 3 -> 6
+        assert [written.presets[8 + i].to_bytes()[6:] for i in range(1, 4)] == [src.presets[i].to_bytes()[6:] for i in range(1, 4)]
+        assert w.aliases.amp(5) == "Mi AMP" and w.aliases.preset(8) == "Con AMP" and w.aliases.bank(2) == "Pack"
+        assert library.ModelStore().get(5) == AM4_FIXTURE[:7868]
+        assert w.controls["amp_type"].combo.itemText(5) == "6. Mi AMP"
+
+
+def test_band_pack_import_downloads_its_models(env):
+    """A band pack (references only): the window lists the authors, asks to download what is missing,
+    then uploads the downloaded models and the presets."""
+    from tankg import pack
+    from tankg.device import TankGBle
+    from test_tankg import AM4_FIXTURE, FakeBlePedal
+    w, _, wait, messages = env
+    _, loaded = pack.builtin()[0]
+    ble = FakeBlePedal(LIVE)
+
+    def open_ble():
+        dev = TankGBle(ble)
+        dev.bank = dev.read_bank()
+        return dev
+
+    asked = []
+    with mock.patch.object(gui.TankG, "open_bluetooth", staticmethod(open_ble)), \
+            mock.patch.object(pack, "fetch", lambda amp: AM4_FIXTURE[:7868]), \
+            mock.patch.object(dialogs, "ask", lambda parent, title, text: asked.append(text) or True):
+        d = dialogs.PackImportDialog(w, loaded)
+        assert any(a.credit["author"] in lbl.text() for a in loaded.amps for lbl in d.findChildren(QtWidgets.QLabel))
+        d.show()
+        d._start()
+        assert wait(lambda: not w.busy, 60) and "importado" in d.step.text() and not messages   # LMT ~5 s per model
+    assert "descargarlos" in asked[0].lower()                     # missing models: asked before downloading
+    assert set(ble.amps) == {a.slot for a in loaded.amps}
+    assert w.aliases.amp(loaded.amps[0].slot) == loaded.amps[0].name
+
+
+def test_pack_preset_warns_when_its_amp_is_replaced(env):
+    """After a band pack import, replacing that TYPE with another model makes the editor warn on the
+    pack presets; the confirmation of an upload counts the presets that will sound different."""
+    w, *_ = env
+    w.local.presets[8].raw[5] = 8
+    w.aliases.set_amp(8, "Randall", {"article": 7414, "file": "x.am4Data"})
+    w.aliases.set_preset_amp(8, {"slot": 8, "name": "Randall", "source": {"article": 7414, "file": "x.am4Data"}})
+    w.current = 8
+    w.refresh()
+    assert w.amp_warn.isHidden()
+    w.aliases.set_amp(8, "Otro")
+    w.refresh()
+    assert not w.amp_warn.isHidden() and "Randall" in w.amp_warn.text() and "Otro" in w.amp_warn.text()
+    warning = w.replace_warning([8])
+    assert "3A" in warning and "TYPE 9" in warning
+    assert "3A" not in w.replace_warning([8], exclude=[8])
+
+
+def test_cloud_version_offers_missing_community_models(env):
+    """A cloud version made on another device with community models: this device offers to download
+    the ones it lacks and keeps them (to export packs or upload them again)."""
+    from tankg import cloud, pack
+    from test_tankg import AM4_FIXTURE
+    w, _, wait, _ = env
+    library.ModelStore().clear()   # earlier tests may have kept models in the shared temporary data folder
+    doc = cloud.make_doc(w.local, {}, {}, amps={"9": "Randall"}, amp_sources={"9": {"article": 7414, "file": "r.am4Data"}})
+    asked = []
+    with mock.patch.object(dialogs, "ask", lambda parent, title, text: asked.append(text) or True), \
+            mock.patch.object(pack, "fetch", lambda amp: AM4_FIXTURE[:7868]):
+        w.load_cloud(doc)
+        assert wait(lambda: library.ModelStore().get(8) is not None)
+    assert "Randall" in asked[0] and w.aliases.amp_sources == {"9": {"article": 7414, "file": "r.am4Data"}}

@@ -1,0 +1,63 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Ozzy y Zakk Wylde",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Mama I'm Coming Home",
+   "raw": "01010001060118443e3c580c1a04003a1a0200c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "Crazy Train",
+   "raw": "0100000114083e4640425c040004000b0e02ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "No More Tears",
+   "raw": "0100000122073c463a465c040004000b0e07ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo Zakk",
+   "raw": "010001011c074648483e640400383a0e1407ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Ozzy y Zakk Wylde"
+ },
+ "amps": [
+  {
+   "slot": 8,
+   "name": "Soldano SLO-100 Lead",
+   "credit": {
+    "author": "Luciano",
+    "title": "Soldano SLO-100 X - Neural DSP - AM4 Pack",
+    "file": "NDSP Soldano SLO-100 X SLO Lead.am4Data",
+    "source": "community.m-vave.com · publicación #6609",
+    "original": []
+   },
+   "community": {
+    "article": 6609,
+    "file": "c772af38-adf8-4dab-a66a-2d075b65f558_NDSP Soldano SLO-100 X SLO Lead.am4Data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "Soldano SLO-100 Crunch",
+   "credit": {
+    "author": "Luciano",
+    "title": "Soldano SLO-100 X - Neural DSP - AM4 Pack",
+    "file": "NDSP Soldano SLO-100 X Crunch.am4Data",
+    "source": "community.m-vave.com · publicación #6609",
+    "original": []
+   },
+   "community": {
+    "article": 6609,
+    "file": "24af59d8-bbfb-4c25-b1fc-5e5376ef0599_NDSP Soldano SLO-100 X Crunch.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

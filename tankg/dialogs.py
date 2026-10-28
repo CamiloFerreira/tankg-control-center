@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import ai, artists, chatapps, device, library, menu
+from . import ai, artists, chatapps, device, library, menu, pack
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, FIELDS, OFF_COLOR, REC_LEN, Bank, slot_name, zone_of
 from .theme import ERROR, OK, TEXT, TEXT_DIM
 
@@ -557,7 +557,8 @@ class _ModelJobDialog(StyledDialog):
 class AmpUploadDialog(_ModelJobDialog):
     """Replace one of the 9 AMP models of the pedal with an .am4data file (Bluetooth only)."""
 
-    def __init__(self, main, data: bytes, name: str):
+    def __init__(self, main, data: bytes, name: str, slot: int | None = None, source: dict | None = None):
+        self.source = source
         super().__init__(main, "Subir modelo de AMP",
                          "Reemplaza uno de los 9 modelos de AMP (perilla TYPE) por un archivo .am4data de M-EFCS. "
                          "Se envía por Bluetooth, igual que la app oficial.", 560, 360)
@@ -571,7 +572,7 @@ class AmpUploadDialog(_ModelJobDialog):
         self.slot = QComboBox()
         self.slot.addItems([main.amp_label(i) for i in range(len(AMP_MODELS))])
         current = main.local.presets[main.current].amp if main.local else 0
-        self.slot.setCurrentIndex(current)
+        self.slot.setCurrentIndex(current if slot is None else slot)
         lay.addWidget(self.slot)
         note = QLabel("Todos los presets que usan ese TYPE sonarán con el modelo nuevo. Para volver al original: "
                       "Pedalera → Restaurar AMP/CAB de fábrica.")
@@ -594,10 +595,109 @@ class AmpUploadDialog(_ModelJobDialog):
     def _start(self) -> None:
         slot = self.slot.currentIndex()
         if not ask(self, "Subir modelo de AMP",
-                   f"Se reemplazará el AMP {slot + 1} de la pedalera por «{self.name.text().strip() or 'el modelo'}».\n"
-                   "¿Continuar?"):
+                   f"Se reemplazará el AMP {slot + 1} de la pedalera por «{self.name.text().strip() or 'el modelo'}»."
+                   + self.main.replace_warning([slot]) + "\n¿Continuar?"):
             return
-        if self.main.start_amp_upload(slot, self.data, self.name.text().strip() or f"AMP {slot + 1}", self):
+        if self.main.start_amp_upload(slot, self.data, self.name.text().strip() or f"AMP {slot + 1}", self, self.source):
+            self._running("Conectando por Bluetooth…")
+
+
+class PackImportDialog(_ModelJobDialog):
+    """Import a .tgpack: shows what it brings, where each AMP model goes (the pack's slot by default;
+    another one remaps the presets that use it) and where the presets go. With models, they and then
+    the presets are written to the pedal (Bluetooth); without, the presets go to the editor."""
+
+    def __init__(self, main, loaded):
+        self.pack = loaded
+        n = len(loaded.presets)
+        what = {"preset": "1 preset", "bank": "un banco de 4 presets", "all": "los 36 presets"}.get(loaded.kind, f"{n} presets")
+        amps = f" y {len(loaded.amps)} modelo{'s' if len(loaded.amps) > 1 else ''} de AMP" if loaded.amps else ""
+        super().__init__(main, f"Importar pack{f' «{loaded.title}»' if loaded.title else ''}",
+                         f"Trae {what}{amps}.", 600, 520)
+        self.running = False
+        _, lay = self.card("1", "Presets")
+        names = [f"{slot_name(o)}  {name or p.amp_name}" for o, p, name in loaded.presets]
+        listing = QLabel("\n".join(names[:8] + ([f"… y {n - 8} más"] if n > 8 else [])))
+        listing.setObjectName("hint")
+        lay.addWidget(listing)
+        self.dest = QComboBox()
+        if loaded.kind == "preset":
+            self.dest.addItems([f"{slot_name(s)}  {main.aliases.preset(s)}".rstrip() for s in range(36)])
+            self.dest.setCurrentIndex(main.current)
+        elif loaded.kind == "bank":
+            self.dest.addItems([f"Banco {b + 1}" + (f" · {main.aliases.bank(b)}" if main.aliases.bank(b) else "") for b in range(9)])
+            self.dest.setCurrentIndex(loaded.presets[0][0] // 4)
+        if self.dest.count():
+            row = QHBoxLayout()
+            row.addWidget(QLabel("Destino:"))
+            row.addWidget(self.dest, 1)
+            lay.addLayout(row)
+        self.amp_slots: list[QComboBox] = []
+        if loaded.amps:
+            _, lay = self.card("2", "Modelos de AMP (perilla TYPE)")
+            for amp in loaded.amps:
+                row = QHBoxLayout()
+                row.addWidget(QLabel(f"«{amp.name}» →"), 1)
+                combo = QComboBox()
+                combo.addItems([main.amp_label(i) for i in range(len(AMP_MODELS))])
+                combo.setCurrentIndex(amp.slot)
+                row.addWidget(combo)
+                lay.addLayout(row)
+                self.amp_slots.append(combo)
+            credits = [f"• {amp.name}: {amp.credit_text()}" for amp in loaded.amps if amp.credit_text()]
+            if credits:
+                who = QLabel("Modelos de sus autores (comunidad de M-VAVE" + (", se descargan al importar" if any(
+                    a.data is None for a in loaded.amps) else "") + "):\n" + "\n".join(credits))
+                who.setObjectName("hint")
+                who.setWordWrap(True)
+                lay.addWidget(who)
+            note = QLabel("Reemplaza ese TYPE en la pedalera; si eliges otro espacio, los presets del pack se ajustan solos. "
+                          "Se suben los AMP y luego los presets, por Bluetooth (antes se hace un backup del banco).")
+        else:
+            note = QLabel("Se cargan en el editor: «Guardar cambios» los pasa a la pedalera.")
+        note.setObjectName("hint")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        _, lay = self.card("", "Progreso")
+        self.bar = QProgressBar()
+        self.bar.setTextVisible(False)
+        self.bar.setRange(0, 1)
+        lay.addWidget(self.bar)
+        self.step = QLabel()
+        self.step.setWordWrap(True)
+        lay.addWidget(self.step)
+        self.close_btn = self.button("Cancelar", self.reject)
+        self.go = self.button("Importar a la pedalera" if loaded.amps else "Cargar en el editor", self._start, "primary")
+        self.inputs = [self.dest, *self.amp_slots]
+
+    def destination(self) -> list[int]:
+        """Slot of each preset of the pack (the chosen one, bank, or where they were)."""
+        if self.pack.kind == "preset":
+            return [self.dest.currentIndex()]
+        if self.pack.kind == "bank":
+            return [self.dest.currentIndex() * 4 + i for i in range(4)]
+        return [o for o, _, _ in self.pack.presets]
+
+    def _start(self) -> None:
+        dest = self.destination()
+        if not self.pack.amps:
+            self.main.load_pack_in_editor(self.pack, dest)
+            self.accept()
+            return
+        moves = {amp.slot: combo.currentIndex() for amp, combo in zip(self.pack.amps, self.amp_slots)}
+        if len(set(moves.values())) < len(moves):
+            self.status(self.step, "Dos modelos no pueden ir al mismo espacio de AMP.", False)
+            return
+        todo = pack.missing([self.pack])
+        if todo and not ask(self, "Importar pack", f"Faltan en este equipo {len(todo)} modelo{'s' if len(todo) > 1 else ''} de AMP "
+                            f"de este pack ({', '.join(a.name for a in todo)}).\n¿Descargarlos ahora de la comunidad de M-VAVE?"):
+            return
+        amps = ", ".join(f"AMP {s + 1}" for s in sorted(moves.values()))
+        if not ask(self, "Importar pack", f"Se reemplazarán en la pedalera {amps} y los presets "
+                   f"{', '.join(slot_name(s) for s in dest) if len(dest) <= 4 else 'de los 36 slots'}."
+                   + self.main.replace_warning(moves.values(), dest) + "\n¿Continuar?"):
+            return
+        if self.main.start_pack_import(self.pack, dest, moves, self):
             self._running("Conectando por Bluetooth…")
 
 
@@ -737,6 +837,18 @@ class ArtistLibrary(StyledDialog):
             for b in banks:
                 self.list.addItem("   " + b.name)
                 self.banks.append(b)
+        # band packs with captured amps (references to the M-VAVE community), after the factory-AMP banks
+        packs = [p for _, p in pack.builtin() if not query or query in (
+            f"{p.title} " + " ".join(a.name for a in p.amps) + " " + " ".join(n or "" for _, _, n in p.presets)).lower()]
+        if packs:
+            head = QListWidgetItem("★ CON AMP IMPORTADO (comunidad M-VAVE)")
+            head.setFlags(Qt.NoItemFlags)
+            self.list.addItem(head)
+            self.banks.append(None)
+            for p in packs:
+                missing = " ⬇" if pack.missing([p]) else ""
+                self.list.addItem(f"   ★ {p.title}{missing}")
+                self.banks.append(p)
         self.list.blockSignals(False)
         first = next((i for i, b in enumerate(self.banks) if b is not None), -1)
         self.list.setCurrentRow(first)
@@ -748,6 +860,16 @@ class ArtistLibrary(StyledDialog):
 
     def _bank_changed(self, _row: int) -> None:
         bank = self._bank()
+        if isinstance(bank, pack.Pack):
+            models = {a.slot: a for a in bank.amps}
+            for i, card in enumerate(self.preset_cards):
+                _, p, name = bank.presets[i]
+                amp = models.get(p.amp)
+                card.setVisible(True)
+                card.setText(f"{'ABCD'[i]}   {name}\n" + (f"★ AMP importado: «{amp.name}» ({amp.credit_text()})" if amp
+                                                         else f"AMP de fábrica: {AMP_MODELS[p.amp]}"))
+            self._update_buttons()
+            return
         for i, card in enumerate(self.preset_cards):
             card.setVisible(bank is not None)
             if bank is not None:
@@ -762,8 +884,10 @@ class ArtistLibrary(StyledDialog):
         dest = self.dest.currentData() + 1
         self.one_btn.setText(f"Aplicar a {slot_name(self.main.current)}")
         self.bank_btn.setText(f"Cargar los 4 en banco {dest}")
-        self.one_btn.setEnabled(bank is not None)
+        self.one_btn.setEnabled(bank is not None and not isinstance(bank, pack.Pack))
         self.bank_btn.setEnabled(bank is not None)
+        if isinstance(bank, pack.Pack):
+            self.bank_btn.setText(f"Importar con sus AMP en banco {dest}…" + (" (descarga)" if pack.missing([bank]) else ""))
         self.target.setText(f"Seleccionado: {slot_name(self.main.current)}")
 
     def apply_one(self) -> None:
@@ -779,6 +903,12 @@ class ArtistLibrary(StyledDialog):
     def apply_bank(self) -> None:
         bank = self._bank()
         if bank is None:
+            return
+        if isinstance(bank, pack.Pack):   # its AMP models are uploaded first (downloaded if missing)
+            self.accept()
+            d = PackImportDialog(self.main, bank)
+            d.dest.setCurrentIndex(self.dest.currentData())
+            d.exec()
             return
         first = self.dest.currentData() * 4
         if not ask(self, "Cargar banco", f"Se reemplazarán los 4 presets del banco {first // 4 + 1} "
@@ -1570,7 +1700,7 @@ class AIDialog(StyledDialog):
         if text is None:
             return
         self._save_settings()
-        prompt = ai.web_prompt(text, self.instrument.currentText(), self._bank())
+        prompt = ai.web_prompt(text, self.instrument.currentText(), self._bank(), dict(self.main.aliases.amps))
         QApplication.clipboard().setText(prompt)
         self.waiting_clipboard = True
         self.apply_btn.setEnabled(False)
@@ -1636,8 +1766,9 @@ class AIDialog(StyledDialog):
         self.gen_btn.setText("Pensando el sonido…")
         self.apply_btn.setEnabled(False)
         self._show_empty("Pensando los 4 presets del banco…" if bank else "Pensando el sonido…")
-        task = _Task(lambda: ai.generate_bank(cfg, text, instrument, likes) if bank else
-                     ai.generate(cfg, text, instrument, like))
+        amps = dict(self.main.aliases.amps)   # uploaded models the AI may choose
+        task = _Task(lambda: ai.generate_bank(cfg, text, instrument, likes, amps) if bank else
+                     ai.generate(cfg, text, instrument, like, amps))
         _PENDING.add(task)
         task.signals.done.connect(lambda r: (_PENDING.discard(task), self.isVisible() and self._done(r)))
         task.signals.failed.connect(lambda m: (_PENDING.discard(task), self.isVisible() and self._failed(m)))

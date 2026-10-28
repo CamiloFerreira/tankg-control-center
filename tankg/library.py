@@ -129,6 +129,34 @@ def factory_ampcab(kind: str) -> bytes | None:
     return data if len(data) == 0x34000 else None
 
 
+class ModelStore:
+    """Copies of the AMP models (.am4data) uploaded to the pedal, one per TYPE slot, so a pack can
+    include them (the pedal can't be read back). Only on this device; cleared by a factory restore."""
+
+    def __init__(self, folder: Path | None = None):
+        self.folder = folder or DATA_DIR / "amps"
+
+    def _path(self, slot: int) -> Path:
+        return self.folder / f"amp{slot + 1}.am4data"
+
+    def get(self, slot: int) -> bytes | None:
+        try:
+            return self._path(slot).read_bytes()
+        except OSError:
+            return None
+
+    def all(self) -> dict[int, bytes]:
+        return {s: d for s in range(9) if (d := self.get(s)) is not None}
+
+    def put(self, slot: int, data: bytes) -> None:
+        self.folder.mkdir(parents=True, exist_ok=True)
+        self._path(slot).write_bytes(data)
+
+    def clear(self) -> None:
+        for s in range(9):
+            self._path(s).unlink(missing_ok=True)
+
+
 class Aliases:
     """Interface-only names for presets ("6A"), banks ("6") and uploaded AMP models ("3");
     the pedal has no names."""
@@ -138,18 +166,23 @@ class Aliases:
         self.presets: dict[str, str] = {}
         self.banks: dict[str, str] = {}
         self.amps: dict[str, str] = {}
+        self.amp_sources: dict[str, dict] = {}   # slot -> {"article", "file"}: the community model it came from
+        self.preset_amps: dict[str, dict] = {}   # "9A" -> {"slot", "name", "source"}: the model a pack preset needs
         try:
             doc = _read_json(path)
             self.presets = {k: v for k, v in doc.get("presets", {}).items() if v}
             self.banks = {k: v for k, v in doc.get("banks", {}).items() if v}
             self.amps = {k: v for k, v in doc.get("amps", {}).items() if v}
+            self.amp_sources = {k: v for k, v in doc.get("amp_sources", {}).items() if v}
+            self.preset_amps = {k: v for k, v in doc.get("preset_amps", {}).items() if v}
         except (OSError, ValueError):
             pass
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
-        _write_json(tmp, {"presets": self.presets, "banks": self.banks, "amps": self.amps})
+        _write_json(tmp, {"presets": self.presets, "banks": self.banks, "amps": self.amps, "amp_sources": self.amp_sources,
+                          "preset_amps": self.preset_amps})
         tmp.replace(self.path)
 
     def preset(self, slot: int) -> str:
@@ -179,13 +212,34 @@ class Aliases:
         """Name of the model uploaded to AMP slot `slot` (0-8); empty = factory model."""
         return self.amps.get(str(slot + 1), "")
 
-    def set_amp(self, slot: int, name: str) -> None:
+    def set_amp(self, slot: int, name: str, source: dict | None = None) -> None:
+        """`source`: the community publication of the model ({"article", "file"}), so another device
+        synced through the cloud can download it; None for a model from a file."""
         name = name.strip()
         if name:
             self.amps[str(slot + 1)] = name
         else:
             self.amps.pop(str(slot + 1), None)
+        if name and source:
+            self.amp_sources[str(slot + 1)] = {"article": int(source["article"]), "file": str(source["file"])}
+        else:
+            self.amp_sources.pop(str(slot + 1), None)
         self.save()
+
+    def set_preset_amp(self, slot: int, need: dict | None) -> None:
+        """The uploaded model a preset was made for ({"slot", "name", "source"}), or None."""
+        if need:
+            self.preset_amps[slot_name(slot)] = need
+        else:
+            self.preset_amps.pop(slot_name(slot), None)
+        self.save()
+
+    def missing_amp(self, slot: int, preset: Preset) -> dict | None:
+        """The model a preset needs when its TYPE now holds something else on the pedal (None = fine)."""
+        need = self.preset_amps.get(slot_name(slot))
+        if need and preset.amp == need["slot"] and self.amp(need["slot"]) != need["name"]:
+            return need
+        return None
 
     def swap(self, a: int, b: int) -> None:
         na, nb = self.preset(a), self.preset(b)

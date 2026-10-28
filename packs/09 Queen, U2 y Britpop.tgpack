@@ -1,0 +1,48 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Queen, U2 y Britpop",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Edge limpio",
+   "raw": "010001010608304a3c385a0400712e681e0500c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "Britpop",
+   "raw": "010000010a083c48403c5c040004000b0e05ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Brian May",
+   "raw": "010001010a084246463a5c0400383a0e1405ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo May",
+   "raw": "010001010a0846464c38640400673e0e1405ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Queen, U2 y Britpop"
+ },
+ "amps": [
+  {
+   "slot": 9,
+   "name": "Vox AC30 1964 Top Boost",
+   "credit": {
+    "author": "Vinício",
+    "title": "1964 VOX AC30 Top Boost Super Twin",
+    "file": "95eae9a5-3927-4054-ad81-d6300db7849e.am4Data",
+    "source": "community.m-vave.com · publicación #11483",
+    "original": []
+   },
+   "community": {
+    "article": 11483,
+    "file": "95eae9a5-3927-4054-ad81-d6300db7849e.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

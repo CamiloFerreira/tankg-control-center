@@ -1,0 +1,63 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "AC/DC y Zeppelin",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Back in Black",
+   "raw": "010000010a083c48443c5c040004000b0e02ffc800"
+  },
+  {
+   "slot": "1B",
+   "name": "Highway to Hell",
+   "raw": "010000010c073a48423e5c040004000b0e02ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Whole Lotta Love",
+   "raw": "010000010c07404640405c04000400381602ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo Angus / Page",
+   "raw": "010001010a07464a4a3a640400363a0e1402ff008c"
+  }
+ ],
+ "banks": {
+  "1": "AC/DC y Zeppelin"
+ },
+ "amps": [
+  {
+   "slot": 8,
+   "name": "Plexi 1959 Jumper Vol 8",
+   "credit": {
+    "author": "Davihiath",
+    "title": "Marshall Plexi Super Lead distortion",
+    "file": "Marshall Plexi Super Lead 1959(Input-I,Lo1+HI2,Volume-8).am4Data",
+    "source": "community.m-vave.com · publicación #6392",
+    "original": []
+   },
+   "community": {
+    "article": 6392,
+    "file": "f648a2af-0c42-41cf-9f53-8365fae1fef8_Marshall Plexi Super Lead 1959(Input-I,Lo1+HI2,Volume-8).am4Data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "Plexi 1959 Vol 6",
+   "credit": {
+    "author": "Davihiath",
+    "title": "Marshall Plexi Super Lead distortion",
+    "file": "Marshall Plexi Super Lead 1959(Input-I,Volume-6).am4Data",
+    "source": "community.m-vave.com · publicación #6392",
+    "original": []
+   },
+   "community": {
+    "article": 6392,
+    "file": "8a2de1c2-7077-4857-a9c8-f23577ba4da0_Marshall Plexi Super Lead 1959(Input-I,Volume-6).am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

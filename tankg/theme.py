@@ -130,6 +130,11 @@ QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 
 /* message boxes and input dialogs */
+/* editor warning: a pack preset whose captured amp is not on the pedal any more */
+QPushButton#ampWarn {{ background: #3b3410; color: {WARN}; border: 1px solid #6b5a14; border-radius: 8px;
+    padding: 8px 12px; text-align: left; font-weight: bold; }}
+QPushButton#ampWarn:hover {{ background: #4a4214; }}
+
 /* command menu (dialogs.CommandMenu): a panel over the editor with a shade, search, quick tiles, groups */
 QWidget#menuShade {{ background: rgba(0, 0, 0, 115); }}
 QFrame#menuPanel {{ background: {BG}; border-right: 1px solid {BORDER_2}; }}

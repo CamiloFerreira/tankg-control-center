@@ -1,0 +1,48 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Pink Floyd",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Breathe",
+   "raw": "01010101040014443c3a580b143846681e0500c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "Money",
+   "raw": "010000010a083444403e5c040004000b0e02ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Another Brick",
+   "raw": "0100010106011e483c3a5a04000e280b0e05ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Comfortably Numb",
+   "raw": "010001010e0846484c406404003c4b681e02ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Pink Floyd"
+ },
+ "amps": [
+  {
+   "slot": 9,
+   "name": "Hiwatt DR103 + Klon",
+   "credit": {
+    "author": "guitarpro1",
+    "title": "Hiwatt DR 103 TS808_Archer Klon high gain",
+    "file": "Hiwatt DR 103 TS808_Archer Klon high gain.am4Data",
+    "source": "community.m-vave.com · publicación #7835",
+    "original": []
+   },
+   "community": {
+    "article": 7835,
+    "file": "701f1a67-99ad-4a73-8943-004b986f0b42_Hiwatt DR 103 TS808_Archer Klon high gain.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

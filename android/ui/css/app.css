@@ -228,6 +228,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: grid; grid-template-columns: 1fr 1.2fr 1.4fr;
   gap: 8px; padding: 10px 12px calc(10px + var(--safe-b)); background: var(--surface); border-top: 1px solid var(--border); }
 
+/* a pack preset whose captured amp is not on the pedal any more (gui.py ampWarn) */
+.amp-warn { display: block; width: 100%; margin: 8px 0 4px; padding: 10px 12px; text-align: left; font-weight: 700; font-size: 13px;
+  color: var(--warn); background: #3b3410; border: 1px solid #6b5a14; border-radius: 10px; }
+
 /* Google Drive sync state, just above the bottom bar (bottom corner on tablets) */
 .cloud-status { position: fixed; left: 12px; bottom: calc(70px + var(--safe-b)); z-index: 5; padding: 3px 10px;
   border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--dim);

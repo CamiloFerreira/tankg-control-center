@@ -21,6 +21,7 @@ args = [
     *[x for name in ("tankG_am4_preset.bin", "tankG_am3_preset.bin", "tankG_am4_ampCab.bin", "tankG_am3_ampCab.bin")
       for x in ("--add-data", f"{ROOT / 'research/factory' / name}{SEP}research/factory")],
     "--add-data", f"{ROOT / 'packaging/icon.png'}{SEP}packaging",
+    *[x for f in sorted((ROOT / "packs").glob("*.tgpack")) for x in ("--add-data", f"{f}{SEP}packs")],
     "--distpath", str(ROOT / "dist"),
     "--workpath", str(ROOT / "build"),
     "--specpath", str(ROOT / "build"),

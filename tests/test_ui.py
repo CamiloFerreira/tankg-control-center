@@ -28,7 +28,7 @@ def test_ui_protocol():
 def test_ui_ai_and_files_match_python(tmp_path):
     """Same apply_design, browser prompt and interchangeable .tgpreset/.tgset files in JS and Python."""
     import json
-    from tankg import ai, am4, artists, library
+    from tankg import ai, am4, artists, library, pack
     from tankg.model import FIELDS, Bank, Preset, zone_gap
     live = (ROOT / "tests/live_bank.bin").read_bytes()
     bank = Bank.from_bytes(live)
@@ -44,6 +44,8 @@ def test_ui_ai_and_files_match_python(tmp_path):
                        "expectBlank": ai.apply_design(odd).to_bytes().hex()})
     prompts = [{"desc": d, "instrument": ins, "bank": bk, "expect": ai.web_prompt(d, ins, bk)}
                for d, ins, bk in [("crunch tipo AC/DC ", ai.INSTRUMENTS[0], False), ("banco de doom", ai.INSTRUMENTS[3], True)]]
+    prompts.append({"desc": "Pantera", "instrument": ai.INSTRUMENTS[0], "bank": True, "amps": {"9": "Randall RG100ES", "8": "Walk"},
+                    "expect": ai.web_prompt("Pantera", ai.INSTRUMENTS[0], True, {"9": "Randall RG100ES", "8": "Walk"})})
     preset_py = tmp_path / "p.tgpreset"
     library.save_preset(bank.presets[3], preset_py, 3, "Mi Preset ñ")
     aliases = library.Aliases(tmp_path / "a.json")
@@ -54,7 +56,11 @@ def test_ui_ai_and_files_match_python(tmp_path):
               "presetName": "Mi Preset ñ", "setPy": set_py.read_text(), "setTitle": "Banco 3",
               "setRaws": [bank.presets[s].to_bytes().hex() for s in range(8, 12)], "bank": live.hex(),
               "gaps": {f.key: [v for v in range(f.maximum + 1) if zone_gap(f, v)] for f in FIELDS},
-              "am4Tables": {"sig": am4._SIG, "tanh": am4._TANH}}
+              "am4Tables": {"sig": am4._SIG, "tanh": am4._TANH},
+              "packPy": json.dumps(pack.make(bank, [4, 5, 6, 7], {4: "Uno ñ"}, {"2": "Banco"}, {str(bank.presets[4].amp + 1): "Mi AMP"},
+                                             {bank.presets[4].amp: (ROOT / "tests/am4_synthetic.am4data").read_bytes()[:7868]}, "Pack")[0]),
+              "packAmp": bank.presets[4].amp}
+    golden_pack = json.loads(golden["packPy"])
     gfile = tmp_path / "golden.json"
     gfile.write_text(json.dumps(golden, ensure_ascii=False), encoding="utf-8")
     r = subprocess.run(["node", str(ROOT / "tests/ui/parity.test.mjs"), str(gfile)], capture_output=True, text=True,
@@ -68,6 +74,11 @@ def test_ui_ai_and_files_match_python(tmp_path):
     title, items = library.load_set(tmp_path / "js.tgset")
     assert title == "Mi banco" and [p for p, _ in items] == bank.presets[4:8] and items[1][1] is None
     assert isinstance(items[0][0], Preset)
+    (tmp_path / "js.tgpack").write_text(out["pack"], encoding="utf-8")
+    from_js = pack.load(tmp_path / "js.tgpack")
+    assert json.loads(out["pack"])["presets"] == golden_pack["presets"] and from_js.banks == {"2": "Banco"}
+    assert [(a.slot, a.name, a.data) for a in from_js.amps] == [(golden["packAmp"], "Mi AMP",
+                                                                 (ROOT / "tests/am4_synthetic.am4data").read_bytes()[:7868])]
 
 
 def test_chat_apps_declared_in_android_manifest():
@@ -87,7 +98,8 @@ def test_ui_cloud_reads_desktop_documents(tmp_path):
     from tankg import cloud
     from tankg.model import Bank
     doc = cloud.make_doc(Bank.from_bytes((ROOT / "tests/live_bank.bin").read_bytes()), {"1A": "Limpio ñ"}, {"1": "Rock"},
-                         amps={"3": "RANDALL Clean"})
+                         amps={"3": "RANDALL Clean"}, amp_sources={"3": {"article": 7414, "file": "r.am4Data"}},
+                         preset_amps={"1A": {"slot": 2, "name": "RANDALL Clean", "source": {"article": 7414, "file": "r.am4Data"}}})
     f = tmp_path / "doc.json"
     f.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
     r = subprocess.run(["node", str(ROOT / "tests/ui/cloud.test.mjs"), str(f)], capture_output=True, text=True,

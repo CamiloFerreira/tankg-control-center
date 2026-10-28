@@ -1,0 +1,63 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Metal moderno 5150",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Limpio moderno",
+   "raw": "01010101060010483838580c18633c681e0700c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "5150 III Rítmica",
+   "raw": "0100000030083e4632465c04000400040007ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "5150 Chug",
+   "raw": "0100000032073e4430485c04000400040000ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo 5150",
+   "raw": "010001011e084648443e640400383c0e1408ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Metal moderno 5150"
+ },
+ "amps": [
+  {
+   "slot": 8,
+   "name": "Peavey 5150 (full rig)",
+   "credit": {
+    "author": "NefJavo",
+    "title": "Peavey 5150-High Gain",
+    "file": "Peavey_5150_-_High_Gain_-_Full_Rig.am4Data",
+    "source": "community.m-vave.com · publicación #11401",
+    "original": []
+   },
+   "community": {
+    "article": 11401,
+    "file": "feac9466-3c40-4cb8-8fb0-a434287a0671_Peavey_5150_-_High_Gain_-_Full_Rig.am4Data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "EVH 5150 III",
+   "credit": {
+    "author": "GMwake",
+    "title": "EVH 5150 III",
+    "file": "EVH 5150 III.am4Data",
+    "source": "community.m-vave.com · publicación #7789",
+    "original": []
+   },
+   "community": {
+    "article": 7789,
+    "file": "270f0f00-b237-4081-9bfb-19e5c3f242d2_EVH 5150 III.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

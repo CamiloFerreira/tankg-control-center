@@ -47,6 +47,8 @@ const pyDoc = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const fromPy = cloud.parseDoc(pyDoc);
 assert.equal(fromPy.presets["1A"], "Limpio ñ"); assert.equal(fromPy.bank.toBytes().length, 758);
 assert.equal(fromPy.banks["1"], "Rock"); assert.deepEqual(fromPy.amps, { 3: "RANDALL Clean" });   // AMP names travel too
+assert.deepEqual(fromPy.ampSources, { 3: { article: 7414, file: "r.am4Data" } });   // where the models came from
+assert.equal(fromPy.presetAmps["1A"].name, "RANDALL Clean");
 assert.equal("amps" in cloud.makeDoc(fromPy.bank, {}, {}, {}).aliases, false);   // like make_doc: only when there is one
 assert.deepEqual(cloud.parseDoc(cloud.makeDoc(fromPy.bank, {}, {}, { 1: "X" })).amps, { 1: "X" });
 

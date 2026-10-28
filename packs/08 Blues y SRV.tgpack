@@ -1,0 +1,78 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Blues y SRV",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Twin limpio",
+   "raw": "01000001040838443e3c5a040004003d220400c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "Texas Flood",
+   "raw": "0100000108073c46483e5c040004003a1a04ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Bassman tweed",
+   "raw": "0100000106063a44423c5a040004000e1404ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo blues",
+   "raw": "01000101080742464c3a6404000b373a1a04ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Blues y SRV"
+ },
+ "amps": [
+  {
+   "slot": 7,
+   "name": "Fender Bassman '58 Clean",
+   "credit": {
+    "author": "MTHRFCKR",
+    "title": "Fender Bassman '58 5F6A (Tweed) (4x10) [Full-Rig]",
+    "file": "Fender Bassman '58 5F6A (Tweed) v4 [Clean] [Amp Only].am4Data",
+    "source": "community.m-vave.com · publicación #7073",
+    "original": []
+   },
+   "community": {
+    "article": 7073,
+    "file": "a2b86bc1-cd82-44fc-8bda-848e333c836d_Fender Bassman '58 5F6A (Tweed) v4 [Clean] [Amp Only].am4Data"
+   }
+  },
+  {
+   "slot": 8,
+   "name": "Twin + TS808",
+   "credit": {
+    "author": "Rios",
+    "title": "Fender Twin Reverb",
+    "file": "05 Fender Twin Reverb TS808 g-11 di half.am4Data",
+    "source": "community.m-vave.com · publicación #9827",
+    "original": []
+   },
+   "community": {
+    "article": 9827,
+    "file": "8ed2a475-c32f-40fd-a9d3-aa14e72a5698_05 Fender Twin Reverb TS808 g-11 di half.am4Data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "Fender Twin Ch2 Vib",
+   "credit": {
+    "author": "Rios",
+    "title": "Fender Twin Reverb",
+    "file": "01 Fender Ch2 Vib.am4Data",
+    "source": "community.m-vave.com · publicación #9827",
+    "original": []
+   },
+   "community": {
+    "article": 9827,
+    "file": "9743241d-91f3-4b3c-8c9f-883ad93185ab_01 Fender Ch2 Vib.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

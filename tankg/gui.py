@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import am4, cloud, dialogs, library, theme, updater
+from . import am4, cloud, dialogs, library, pack, theme, updater
 from .version import PRIVACY_URL, TERMS_URL, __version__
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_gap, zone_of
@@ -505,6 +505,13 @@ class MainWindow(QMainWindow):
         head.addWidget(self.revert_btn)
         head.addWidget(self.send_btn)
         lay.addLayout(head)
+        # a pack preset whose captured amp is no longer in its TYPE slot on the pedal: say so and offer it
+        self.amp_warn = QPushButton()
+        self.amp_warn.setObjectName("ampWarn")
+        self.amp_warn.setCursor(Qt.PointingHandCursor)
+        self.amp_warn.clicked.connect(self.fix_missing_amp)
+        self.amp_warn.hide()
+        lay.addWidget(self.amp_warn)
 
         pedal = QFrame()
         pedal.setObjectName("pedal")
@@ -704,7 +711,7 @@ class MainWindow(QMainWindow):
                  "revertAll": bool(mod), "backupNow": dev, "restoreFile": dev, "cloudPush": has, "cloudPull": has}
         for cmd in ("copy", "duplicate", "swap", "left", "right", "renameBank", "library", "ai", "factory",
                     "factoryBank", "factoryAll", "saveBank", "importPreset", "exportPreset", "importSet", "exportSet",
-                    "compare", "bytes"):
+                    "compare", "bytes", "exportPack"):
             state[cmd] = state.get(cmd, True) and has
         for cmd in ("cloudConnect", "cloudPush", "cloudPull", "cloudHistory", "cloudDisconnect"):
             if (cmd == "cloudConnect") == cloud_on:
@@ -727,7 +734,9 @@ class MainWindow(QMainWindow):
             "backupNow": self.backup_device, "backups": lambda: dialogs.BackupManager(self).exec(),
             "restoreFile": self.restore_to_device, "openBank": self.open_bank, "saveBank": self.save_bank,
             "importPreset": self.import_preset, "exportPreset": self.export_preset, "importSet": self.import_bank_set,
-            "exportSet": self.export_bank_set, "compare": self.compare_file, "cloudConnect": self.cloud_connect,
+            "exportSet": self.export_bank_set, "compare": self.compare_file, "importPack": self.import_pack,
+            "exportPack": self.export_pack, "bandPacks": self.open_band_packs, "downloadAmps": self.download_band_amps,
+            "cloudConnect": self.cloud_connect,
             "cloudPush": lambda: self.cloud_push(quiet=False), "cloudPull": lambda: self.cloud_check(manual=True),
             "cloudHistory": self.cloud_history, "cloudDisconnect": self.cloud_disconnect,
             "calibrate": lambda: dialogs.CalibrationWizard(self).exec(), "update": self.check_updates,
@@ -795,6 +804,12 @@ class MainWindow(QMainWindow):
         self.bank_tag.setMinimumWidth(self.bank_tag.sizeHint().width())
         self.display.setText(name)
         self.badge.setVisible(self.current in modified)
+        need = self.aliases.missing_amp(self.current, self.local.presets[self.current]) if self.local else None
+        self.amp_warn.setVisible(need is not None)
+        if need:
+            now = self.aliases.amp(need["slot"]) or AMP_MODELS[need["slot"]]
+            self.amp_warn.setText(f"⚠ Este preset es para el AMP «{need['name']}», pero el TYPE {need['slot'] + 1} de la "
+                                  f"pedalera ahora es «{now}» y sonará distinto.  Subir «{need['name']}»…")
         self.revert_btn.setEnabled(self.current in modified)
         self.send_btn.setEnabled(self.current in modified)
         self.send_all_action.setText(f"Guardar cambios ({len(modified)})" if modified else "Guardar cambios")
@@ -1034,6 +1049,23 @@ class MainWindow(QMainWindow):
 
     # AMP models ---------------------------------------------------------------------
 
+    def presets_using(self, amp_slot: int, exclude=()) -> list[int]:
+        """Preset slots that use TYPE `amp_slot`: replacing that model changes how they sound."""
+        bank = self.local or self.device
+        return [s for s in range(SLOTS) if bank and bank.presets[s].amp == amp_slot and s not in exclude]
+
+    def replace_warning(self, amp_slots, exclude=()) -> str:
+        """Text for the confirmation: other presets that will sound with the new model."""
+        parts = []
+        for a in sorted(set(amp_slots)):
+            used = self.presets_using(a, exclude)
+            if used:
+                now = self.aliases.amp(a) or AMP_MODELS[a]
+                shown = ", ".join(slot_name(s) for s in used[:8]) + (f" y {len(used) - 8} más" if len(used) > 8 else "")
+                parts.append(f"{len(used)} preset{'s' if len(used) > 1 else ''} ({shown}) usa{'n' if len(used) > 1 else ''} "
+                             f"el TYPE {a + 1} («{now}») y sonará{'n' if len(used) > 1 else ''} con el modelo nuevo")
+        return ("\n\nOjo: " + "; ".join(parts) + ". Se puede volver con «Restaurar AMP/CAB de fábrica».") if parts else ""
+
     def amp_label(self, slot: int) -> str:
         """TYPE entry: the uploaded model's name when the slot no longer holds the factory one."""
         custom = self.aliases.amp(slot)
@@ -1057,14 +1089,15 @@ class MainWindow(QMainWindow):
             return
         dialogs.AmpUploadDialog(self, data, am4.name_from_path(path)).exec()
 
-    def start_amp_upload(self, slot: int, data: bytes, name: str, dialog) -> bool:
+    def start_amp_upload(self, slot: int, data: bytes, name: str, dialog, source: dict | None = None) -> bool:
         def job(dev, report):
             report("Calculando el bloque LMT del modelo (unos segundos)…", 0, 1)
             dev.upload_amp(slot, am4.upload_payload(data), report)
             return slot
 
         def done(_) -> None:
-            self.aliases.set_amp(slot, name)
+            self.aliases.set_amp(slot, name, source)   # source: the community publication, if it came from one
+            library.ModelStore().put(slot, data)   # kept so a pack can include it
             self.refresh_amp_labels()
             dialog.finished(f"AMP {slot + 1} reemplazado por «{name}»")
             self.statusBar().showMessage(f"Modelo de AMP subido al espacio {slot + 1}: {name}", 8000)
@@ -1091,7 +1124,9 @@ class MainWindow(QMainWindow):
         def done(result) -> None:
             after, path = result
             self.aliases.amps.clear()
+            self.aliases.amp_sources.clear()
             self.aliases.save()
+            library.ModelStore().clear()
             library.Settings().set_factory_set(kind)
             self.refresh_amp_labels()
             if after is not None:
@@ -1102,6 +1137,168 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"AMP/CAB de fábrica {library.FACTORY_SETS[kind]} restaurados", 8000)
 
         return self._run(job, done, "Restaurando AMP/CAB de fábrica…", dialog=dialog, opener=TankG.open_bluetooth)
+
+    # preset packs (.tgpack: presets + the AMP models they use) ----------------------------
+
+    def export_pack(self) -> None:
+        if not self._need_local():
+            return
+        cur, first = self.current, self.current // 4 * 4
+        options = {f"Este preset ({slot_name(cur)})": [cur], f"Este banco ({first // 4 + 1}, 4 presets)": list(range(first, first + 4)),
+                   "Los 36 presets": list(range(SLOTS))}
+        choice, ok = QInputDialog.getItem(self, "Exportar pack", "¿Qué guardo en el pack?", list(options), 1, False)
+        if not ok:
+            return
+        slots = options[choice]
+        title = (self.aliases.preset(cur) if len(slots) == 1 else self.aliases.bank(first // 4) if len(slots) == 4
+                 else "Tank-G") or slot_name(slots[0])
+        path, _ = QFileDialog.getSaveFileName(self, "Exportar pack", str(Path.home() / f"{title}{pack.EXTENSION}"),
+                                              f"Pack de Tank-G (*{pack.EXTENSION})")
+        if not path:
+            return
+        doc, missing = pack.make(self.local, slots, {s: self.aliases.preset(s) for s in slots}, self.aliases.banks,
+                                 self.aliases.amps, library.ModelStore().all(), title)
+        pack.save(doc, path)
+        note = f"Pack guardado: {len(slots)} preset{'s' if len(slots) > 1 else ''}, {len(doc['amps'])} AMP"
+        if missing:
+            note += (f". Sin el archivo del AMP {', '.join(str(a + 1) for a in missing)} (subido desde otro equipo o una "
+                     "versión anterior): súbelo de nuevo aquí para incluirlo")
+            QMessageBox.information(self, "Exportar pack", note + ".")
+        self.statusBar().showMessage(note, 8000)
+
+    def open_band_packs(self) -> None:
+        """The band packs shipped with the app (presets + the amp of each band, downloaded from the
+        M-VAVE community on import)."""
+        packs = pack.builtin()
+        if not packs:
+            QMessageBox.information(self, "Packs de bandas", "Esta versión no trae packs de bandas.")
+            return
+        labels = [f"{p.title} — {', '.join(a.name for a in p.amps)}" + ("" if not pack.missing([p]) else "   (falta descargar)")
+                  for _, p in packs]
+        label, ok = QInputDialog.getItem(self, "Packs de bandas con AMP",
+                                         "Un banco de 4 presets con el ampli de cada banda. Los modelos son capturas "
+                                         "de la comunidad de M-VAVE (se descargan al importar, con su autor):",
+                                         labels, 0, False)
+        if ok:
+            dialogs.PackImportDialog(self, packs[labels.index(label)][1]).exec()
+
+    def download_band_amps(self) -> None:
+        """Download to this device every model the band packs use (from the M-VAVE community)."""
+        todo = pack.missing([p for _, p in pack.builtin()])
+        if not todo:
+            QMessageBox.information(self, "Descargar AMP", "Ya están en este equipo todos los modelos de los packs de bandas.")
+            return
+        if not dialogs.ask(self, "Descargar AMP", f"Se descargarán {len(todo)} modelos de AMP de la comunidad de M-VAVE "
+                           "(capturas de sus autores, ~8 KB cada uno) y quedarán en este equipo. ¿Continuar?"):
+            return
+        self.statusBar().showMessage(f"Descargando {len(todo)} modelos de AMP…")
+
+        def work():
+            for amp in todo:
+                pack.fetch(amp)
+            return len(todo)
+
+        self._background(work, lambda n: QMessageBox.information(
+            self, "Descargar AMP", f"{n} modelos de AMP descargados: los packs de bandas ya funcionan sin conexión."),
+            lambda m: QMessageBox.warning(self, "Descargar AMP", m))
+
+    def fix_missing_amp(self) -> None:
+        """Upload again the captured amp the current pack preset was made for (downloaded if needed)."""
+        need = self.aliases.missing_amp(self.current, self.local.presets[self.current]) if self.local else None
+        if not need:
+            return
+        amp = pack.PackAmp(need["slot"], need["name"], None, need.get("source"))
+        if amp.community is None:
+            QMessageBox.information(self, "AMP del preset", f"«{need['name']}» vino de un archivo: vuelve a subirlo con "
+                                    "☰ Menú → Subir modelo de AMP, o importa de nuevo su pack.")
+            return
+        if pack.missing([pack.Pack(None, [], [amp])]) and not dialogs.ask(
+                self, "AMP del preset", f"«{need['name']}» no está en este equipo. ¿Descargarlo de la comunidad de M-VAVE?"):
+            return
+        try:
+            data = pack.fetch(amp)
+        except ValueError as e:
+            QMessageBox.warning(self, "AMP del preset", str(e))
+            return
+        dialogs.AmpUploadDialog(self, data, need["name"], need["slot"], amp.community).exec()
+
+    def import_pack(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Importar pack", str(Path.home()), f"Pack de Tank-G (*{pack.EXTENSION})")
+        if not path:
+            return
+        try:
+            loaded = pack.load(path)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Importar pack", str(e))
+            return
+        dialogs.PackImportDialog(self, loaded).exec()
+
+    def _pack_names(self, loaded: "pack.Pack", dest: list[int]) -> None:
+        for (_, _, name), s in zip(loaded.presets, dest):
+            self.aliases.set_preset(s, name or "")
+        shift = {orig // 4: s // 4 for (orig, _, _), s in zip(loaded.presets, dest)}
+        for b, name in loaded.banks.items():
+            if int(b) - 1 in shift:
+                self.aliases.set_bank(shift[int(b) - 1], name)
+
+    def load_pack_in_editor(self, loaded: "pack.Pack", dest: list[int]) -> None:
+        """A pack without AMP models: into the editor, like a .tgset («Guardar cambios» writes it)."""
+        if self.local is None:
+            self.local = (self.device or library.factory_bank()).copy()
+        self._push_undo()
+        for (_, p, _), s in zip(loaded.presets, dest):
+            self.local.presets[s] = p.copy()
+        self._pack_names(loaded, dest)
+        self.refresh()
+        self.statusBar().showMessage("Pack cargado en el editor. «Guardar cambios» lo pasa a la pedalera.", 8000)
+
+    def start_pack_import(self, loaded: "pack.Pack", dest: list[int], moves: dict[int, int], dialog) -> bool:
+        """Upload the pack's AMP models (to the chosen slots), then its presets, verified (Bluetooth)."""
+        presets = pack.remap([p for _, p, _ in loaded.presets], moves)
+
+        def job(dev, report):
+            for amp in loaded.amps:   # models referenced to the M-VAVE community come from there
+                if amp.data is None:
+                    report(f"Descargando «{amp.name}» de la comunidad de M-VAVE…", -1, -1)
+                    amp.data = pack.fetch(amp)
+            path = str(library.backup(dev.bank or dev.read_bank(), "auto"))
+            for n, amp in enumerate(loaded.amps):
+                slot = moves.get(amp.slot, amp.slot)
+                report(f"AMP {n + 1} de {len(loaded.amps)}: «{amp.name}» → espacio {slot + 1}…", -1, -1)
+                dev.upload_amp(slot, am4.upload_payload(amp.data),
+                               lambda text, i, t, n=n: report(f"AMP {n + 1} de {len(loaded.amps)}: {text}", i, t))
+            target = dev.bank.copy()
+            for p, s in zip(presets, dest):
+                target.presets[s] = p.copy()
+            after = dev.write_presets(target, dest, lambda i, t, s: report(
+                "Verificando los presets…" if s is None else f"Preset {i + 1} de {t}…", i, t))
+            return after, path
+
+        def done(result) -> None:
+            after, _ = result
+            store = library.ModelStore()
+            for amp in loaded.amps:
+                slot = moves.get(amp.slot, amp.slot)
+                self.aliases.set_amp(slot, amp.name, amp.community)
+                store.put(slot, amp.data)
+            self._pack_names(loaded, dest)
+            models = {moves.get(a.slot, a.slot): a for a in loaded.amps}
+            for p, s in zip(presets, dest):
+                amp = models.get(p.amp)
+                self.aliases.set_preset_amp(s, {"slot": p.amp, "name": amp.name, "source": amp.community} if amp else None)
+            if self.local is not None:
+                self._push_undo()
+                for s in dest:
+                    self.local.presets[s] = after.presets[s].copy()
+            else:
+                self.local = after.copy()
+            self.device = after
+            self.refresh_amp_labels()
+            self.refresh()
+            dialog.finished(f"Pack importado: {len(loaded.amps)} AMP y {len(dest)} preset{'s' if len(dest) > 1 else ''}, verificados")
+            self.statusBar().showMessage("Pack importado en la pedalera", 8000)
+
+        return self._run(job, done, "Importando pack…", dialog=dialog, opener=TankG.open_bluetooth)
 
     def send_all(self) -> None:
         if self._need_local() and self.device is not None:
@@ -1240,6 +1437,7 @@ class MainWindow(QMainWindow):
         self._push_undo()
         for s in slots:
             self.local.presets[s] = factory.presets[s].copy()
+            self.aliases.set_preset_amp(s, None)
         self.refresh()
         self._schedule_live()
         self.statusBar().showMessage("Presets de fábrica cargados en el editor. «Guardar» los pasa a la pedalera.",
@@ -1271,6 +1469,7 @@ class MainWindow(QMainWindow):
             slot = first + i
             self.local.presets[slot] = preset.copy()
             self.aliases.set_preset(slot, name)
+            self.aliases.set_preset_amp(slot, None)   # no longer the pack preset it was
             slots.append(slot)
         if bank_name and len(items) == 4 and first % 4 == 0:
             self.aliases.set_bank(first // 4, bank_name)
@@ -1471,7 +1670,8 @@ class MainWindow(QMainWindow):
     def _cloud_doc(self) -> dict | None:
         """What the cloud mirrors: the editor (or the pedal if nothing is loaded) and the names."""
         bank = self.local or self.device
-        return (cloud.make_doc(bank, self.aliases.presets, self.aliases.banks, amps=self.aliases.amps)
+        return (cloud.make_doc(bank, self.aliases.presets, self.aliases.banks, amps=self.aliases.amps,
+                               amp_sources=self.aliases.amp_sources, preset_amps=self.aliases.preset_amps)
                 if bank is not None else None)
 
     def _cloud_status(self, text: str) -> None:
@@ -1600,12 +1800,34 @@ class MainWindow(QMainWindow):
         self.local = bank.copy()
         self.aliases.presets, self.aliases.banks = dict(presets), dict(banks)
         self.aliases.amps = cloud.doc_amps(doc)
+        self.aliases.amp_sources = cloud.doc_amp_sources(doc)
+        self.aliases.preset_amps = cloud.doc_preset_amps(doc)
         self.aliases.save()
         self.refresh_amp_labels()
         self.refresh()
+        self._offer_cloud_models()
         n = len(self.modified_slots())
         self.statusBar().showMessage("Presets de la nube cargados" + (
             f": {n} distintos de la pedalera, «Guardar cambios» los pasa." if n else "."), 8000)
+
+    def _offer_cloud_models(self) -> None:
+        """The cloud version has AMP models uploaded on another device from the M-VAVE community:
+        offer to download those this device lacks (to export packs or upload them again here)."""
+        todo = [(int(slot) - 1, pack.PackAmp(int(slot) - 1, self.aliases.amps.get(slot, f"AMP {slot}"), None, ref))
+                for slot, ref in self.aliases.amp_sources.items()
+                if library.ModelStore().get(int(slot) - 1) is None]
+        if not todo or not dialogs.ask(
+                self, "Nube", f"La versión de la nube usa {len(todo)} modelo{'s' if len(todo) > 1 else ''} de AMP de la comunidad "
+                f"de M-VAVE que este equipo no tiene ({', '.join(a.name for _, a in todo)}).\n¿Descargarlos ahora?"):
+            return
+
+        def work():
+            for slot, amp in todo:
+                library.ModelStore().put(slot, pack.fetch(amp))
+            return len(todo)
+
+        self._background(work, lambda n: self.statusBar().showMessage(f"{n} modelos de AMP descargados de la comunidad", 6000),
+                         lambda m: QMessageBox.warning(self, "Nube", m))
 
     def cloud_history(self) -> None:
         drive = self._drive()

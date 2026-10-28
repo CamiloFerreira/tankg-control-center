@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -751,3 +752,99 @@ def test_cloud_sign_in_push_pull_history(monkeypatch):
     assert hist[0]["name"] == cloud.LATEST
     assert 1 <= len(hist) - 1 <= cloud.HISTORY_KEEP
     assert cloud.parse_doc(cloud.pull(drive))[1] == {"1A": f"v{cloud.HISTORY_KEEP + 2}"}
+
+
+def test_pack_roundtrip_remap_and_missing_models(tmp_path):
+    from tankg import pack
+    bank = Bank.from_bytes(LIVE)
+    for s in (4, 5):
+        bank.presets[s].raw[5] = 2          # these two use AMP 3, replaced by an uploaded model
+    model = AM4_FIXTURE[:7868]
+    doc, missing = pack.make(bank, [4, 5, 6, 7], {4: "Uno", 6: "Tres"}, {"2": "Banco Dos"}, {"3": "Mi AMP"}, {2: model}, "Mi pack")
+    assert missing == [] and [a["slot"] for a in doc["amps"]] == [3] and doc["banks"] == {"2": "Banco Dos"}
+    path = pack.save(doc, tmp_path / "x.tgpack")
+    p = pack.load(path)
+    assert p.kind == "bank" and p.title == "Mi pack" and p.banks == {"2": "Banco Dos"}
+    assert [(o, n) for o, _, n in p.presets] == [(4, "Uno"), (5, None), (6, "Tres"), (7, None)]
+    assert len(p.amps) == 1 and p.amps[0].slot == 2 and p.amps[0].data == model and p.amps[0].name == "Mi AMP"
+    moved = pack.remap([q for _, q, _ in p.presets], {2: 6})
+    assert [q.amp for q in moved] == [6 if bank.presets[s].amp == 2 else bank.presets[s].amp for s in (4, 5, 6, 7)]
+    assert [q.amp for q in moved[:2]] == [6, 6]
+    _, missing = pack.make(bank, [4], {}, {}, {"3": "Mi AMP"}, {}, None)   # model not kept on this device
+    assert missing == [2]
+    with pytest.raises(ValueError):
+        pack.parse({"format": "otro"})
+    bad = dict(doc, amps=[{"slot": 3, "name": "x", "data": "QUJD"}])
+    with pytest.raises(ValueError):
+        pack.parse(bad)
+
+
+def test_model_store(tmp_path):
+    store = library.ModelStore(tmp_path / "amps")
+    assert store.all() == {}
+    store.put(4, b"AM4\x00x")
+    assert store.get(4) == b"AM4\x00x" and list(store.all()) == [4]
+    store.clear()
+    assert store.all() == {}
+
+
+def test_band_packs_are_references_with_credits(monkeypatch):
+    """The packs shipped with the apps hold no third-party model: only a reference to its community
+    publication and its author; the model is downloaded once and kept on the device."""
+    from tankg import pack
+    packs = pack.builtin()
+    assert len(packs) >= 10
+    for path, p in packs:
+        assert p.kind == "bank" and p.amps, path.name
+        for amp in p.amps:
+            assert amp.data is None and amp.community["article"] > 0 and amp.credit["author"], path.name
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        assert all("data" not in a for a in raw["amps"])
+    amp = packs[0][1].amps[0]
+    assert pack.missing([packs[0][1]])[0] is amp and not pack.cached(amp)
+    calls = []
+
+    class Answer:
+        def __init__(self, url):
+            calls.append(url)
+
+        def read(self):
+            return AM4_FIXTURE[:7868]
+
+    monkeypatch.setattr(pack.urllib.request, "urlopen", lambda req, timeout=0: Answer(req.full_url))
+    assert pack.fetch(amp) == AM4_FIXTURE[:7868]
+    assert "articleId=" in calls[0] and pack.cached(amp)
+    assert pack.fetch(amp) == AM4_FIXTURE[:7868] and len(calls) == 1      # kept on the device: no second download
+    monkeypatch.setattr(pack.urllib.request, "urlopen", lambda req, timeout=0: type("A", (), {"read": lambda self: b"junk"})())
+    other = next(a for _, p in packs for a in p.amps if not pack.cached(a))
+    with pytest.raises(ValueError):
+        pack.fetch(other)                                                   # not an AM4 model: refused
+
+
+def test_ai_knows_uploaded_amps():
+    from tankg import ai
+    plain = ai.web_prompt("rítmica de Pantera", ai.INSTRUMENTS[0])
+    assert "AMP SUBIDOS" not in plain
+    text = ai.web_prompt("rítmica de Pantera", ai.INSTRUMENTS[0], False, {"9": "Randall RG100ES '87", "8": "Walk"})
+    assert "TYPE 8 (amp_type 7): «Walk»" in text and "TYPE 9 (amp_type 8): «Randall RG100ES '87»" in text
+    assert text.index("TYPE 8") < text.index("TYPE 9")
+
+
+def test_amp_sources_and_preset_needs(tmp_path):
+    from tankg import cloud
+    a = library.Aliases(tmp_path / "a.json")
+    a.set_amp(8, "Randall", {"article": 7414, "file": "x.am4Data"})
+    a.set_preset_amp(32, {"slot": 8, "name": "Randall", "source": {"article": 7414, "file": "x.am4Data"}})
+    b = library.Aliases(tmp_path / "a.json")
+    assert b.amp_sources == {"9": {"article": 7414, "file": "x.am4Data"}}
+    p = Preset(bytearray(21))
+    p.raw[5] = 8
+    assert b.missing_amp(32, p) is None                       # TYPE 9 holds the model the preset needs
+    b.set_amp(8, "Otro AMP")                                  # from a file: no source; the preset's model is gone
+    assert b.amp_sources == {} and b.missing_amp(32, p)["name"] == "Randall"
+    p.raw[5] = 2
+    assert b.missing_amp(32, p) is None                       # the preset doesn't use that TYPE any more
+    bank = Bank.from_bytes(LIVE)
+    doc = cloud.make_doc(bank, {}, {}, amps={"9": "Randall"}, amp_sources=a.amp_sources, preset_amps=a.preset_amps)
+    assert cloud.doc_amp_sources(doc) == a.amp_sources and cloud.doc_preset_amps(doc) == a.preset_amps
+    assert "ampSources" not in cloud.make_doc(bank, {}, {})["aliases"]   # older documents keep their key

@@ -32,6 +32,7 @@ def render() -> str:
     dump = lambda v: json.dumps(v, ensure_ascii=False, separators=(",", ":"))  # noqa: E731
     byte_names = {f.offset: f.label for f in FIELDS}
     byte_names.update({OFF_COLOR: "LED rojo", OFF_COLOR + 1: "LED verde", OFF_COLOR + 2: "LED azul"})
+    band_packs = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((ROOT / "packs").glob("*.tgpack"))]
     factory = {k: (b.to_bytes().hex() if (b := library.factory_bank(k)) else None) for k in library.FACTORY_SETS}
     ai_data = {"system": ai.system_prompt(), "schema": ai.SCHEMA, "bankSchema": ai.BANK_SCHEMA,
                "bankInstructions": ai.BANK_INSTRUCTIONS, "instruments": ai.INSTRUMENTS,
@@ -48,6 +49,7 @@ def render() -> str:
             f"export const QUICK = {dump(menu.QUICK)};\n"
             f"export const QUICK_LABEL = {dump(menu.QUICK_LABEL)};\n"
             f"export const ICONS = {dump(menu.ICONS)};\n"
+            f"export const BAND_PACKS = {dump(band_packs)};   // packs/*.tgpack: references to the M-VAVE community\n"
             f"export const AI = {dump(ai_data)};\n"
             f"export const AMP_MODELS = {dump(AMP_MODELS)};\n"
             f"export const CAB_MODELS = {dump(CAB_MODELS)};\n"

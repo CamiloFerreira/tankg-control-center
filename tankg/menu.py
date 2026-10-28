@@ -72,6 +72,8 @@ MENU = [
     ("Sonidos", "library", [
         ("library", "Biblioteca de sonidos", "Presets de bandas y estilos listos para usar", "library", "bandas artistas"),
         ("ai", "Crear con IA…", "Describe un sonido y la IA arma el preset", "ai", "inteligencia artificial"),
+        ("bandPacks", "Packs de bandas con AMP…", "Presets con el ampli de cada banda (comunidad M-VAVE)", "chip", "amp modelo pantera metallica slash"),
+        ("downloadAmps", "Descargar AMP de los packs", "Guarda en este equipo los modelos de los packs de bandas", "cloud-down", "amp modelos descargar comunidad"),
     ]),
     ("Fábrica y modelos", "factory", [
         ("factory", "Restaurar este preset de fábrica", "Lo carga en el editor; «Guardar» lo pasa", "factory", ""),
@@ -92,6 +94,8 @@ MENU = [
         ("exportPreset", "Exportar preset", "El seleccionado, en Descargas", "export", "compartir"),
         ("importSet", "Importar banco de 4 (.tgset)…", "Al banco actual", "import", ""),
         ("exportSet", "Exportar banco de 4 (.tgset)", "El banco actual, en Descargas", "export", "compartir"),
+        ("importPack", "Importar pack (.tgpack)…", "Presets con sus modelos de AMP, de una vez", "import", "amp paquete modelo"),
+        ("exportPack", "Exportar pack…", "Preset, banco o los 36, con sus AMP subidos", "export", "amp paquete compartir"),
         ("compare", "Comparar con archivo de banco…", "Muestra qué presets cambian", "compare", "diferencias"),
     ]),
     ("Nube · Google Drive", "cloud", [

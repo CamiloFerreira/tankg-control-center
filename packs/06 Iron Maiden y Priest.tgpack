@@ -1,0 +1,63 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Iron Maiden y Priest",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Remember Tomorrow",
+   "raw": "01010001060014443c3a580e1c04003a1a0200c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "The Trooper",
+   "raw": "0100000118073e4642425c040004000b0e02ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Breaking the Law",
+   "raw": "010000011208424640405c040004000b0e02ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo Maiden",
+   "raw": "01000101140746484a3c640400383c0e1402ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Iron Maiden y Priest"
+ },
+ "amps": [
+  {
+   "slot": 8,
+   "name": "JCM800 2203 TS Boost",
+   "credit": {
+    "author": "FAUS",
+    "title": "Marshall JCM 800 2203",
+    "file": "JCM800_2203__Hi_Gain__TS_boost_.am4data",
+    "source": "community.m-vave.com · publicación #11431",
+    "original": []
+   },
+   "community": {
+    "article": 11431,
+    "file": "c9ce50a5-de23-4c26-b76f-f8e4758169e9_JCM800_2203__Hi_Gain__TS_boost_.am4data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "JCM800 2203 Crunch",
+   "credit": {
+    "author": "FAUS",
+    "title": "Marshall JCM 800 2203",
+    "file": "JCM800_2203__Crunch.am4data",
+    "source": "community.m-vave.com · publicación #11431",
+    "original": []
+   },
+   "community": {
+    "article": 11431,
+    "file": "c90b77bd-9753-4b0e-ab57-f9bb75693e2b_JCM800_2203__Crunch.am4data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

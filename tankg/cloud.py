@@ -199,10 +199,15 @@ class Drive:
 
 # sync -------------------------------------------------------------------------------------------
 
-def make_doc(bank: Bank, presets: dict, banks: dict, device: str | None = None, amps: dict | None = None) -> dict:
+def make_doc(bank: Bank, presets: dict, banks: dict, device: str | None = None, amps: dict | None = None,
+             amp_sources: dict | None = None, preset_amps: dict | None = None) -> dict:
     aliases = {"presets": dict(presets), "banks": dict(banks)}
     if amps:
         aliases["amps"] = dict(amps)
+    if amp_sources:   # where the uploaded models came from (M-VAVE community), to download them elsewhere
+        aliases["ampSources"] = {k: dict(v) for k, v in amp_sources.items()}
+    if preset_amps:   # the captured amp each pack preset was made for
+        aliases["presetAmps"] = {k: dict(v) for k, v in preset_amps.items()}
     return {"format": FORMAT, "version": 1, "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "device": device or device_name(), "bank": bank.to_bytes().hex(), "aliases": aliases}
 
@@ -224,6 +229,15 @@ def parse_doc(doc: dict) -> tuple[Bank, dict, dict]:
 def doc_amps(doc: dict) -> dict:
     """Names of the uploaded AMP models ({"3": "RANDALL Clean"}); empty = factory models."""
     return dict((doc.get("aliases") or {}).get("amps") or {})
+
+
+def doc_preset_amps(doc: dict) -> dict:
+    return {k: dict(v) for k, v in ((doc.get("aliases") or {}).get("presetAmps") or {}).items()}
+
+
+def doc_amp_sources(doc: dict) -> dict:
+    """Community publication of each uploaded model that came from one ({"3": {"article", "file"}})."""
+    return {k: dict(v) for k, v in ((doc.get("aliases") or {}).get("ampSources") or {}).items()}
 
 
 def push(drive: Drive, doc: dict) -> None:

@@ -1,0 +1,63 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Van Halen",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Jamie's Cryin'",
+   "raw": "0100000108083246403c5a040004000b0e02ffc800"
+  },
+  {
+   "slot": "1B",
+   "name": "Unchained",
+   "raw": "010100010e0840483e405c381404000b0e02ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Panama",
+   "raw": "010000010e073e48403e5c040004000b0e02ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Eruption",
+   "raw": "010001010c07464a463c6404000e3a0e1402ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Van Halen"
+ },
+ "amps": [
+  {
+   "slot": 8,
+   "name": "Brown Sound Compressed",
+   "credit": {
+    "author": "Agent-045",
+    "title": "Van Halen \"Brown Sound\" - ToneX",
+    "file": "unchained_compressed.am4Data",
+    "source": "community.m-vave.com · publicación #8322",
+    "original": []
+   },
+   "community": {
+    "article": 8322,
+    "file": "c973e982-6bdf-4db3-94fa-aeee32a97e81_unchained_compressed.am4Data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "Brown Sound Natural",
+   "credit": {
+    "author": "Agent-045",
+    "title": "Van Halen \"Brown Sound\" - ToneX",
+    "file": "Unchained_Natural.am4Data",
+    "source": "community.m-vave.com · publicación #8322",
+    "original": []
+   },
+   "community": {
+    "article": 8322,
+    "file": "b9f25563-c998-4e81-bec8-857b03b5e2b1_Unchained_Natural.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

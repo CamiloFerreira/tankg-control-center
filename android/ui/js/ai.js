@@ -42,16 +42,30 @@ export function applyDesign(design, like = null) {
   return p;
 }
 
-const userPrompt = (description, instrument, bank) =>
-  `Instrumento: ${instrument}\nSonido deseado: ${description.trim()}` + (bank ? `\n\n${AI.bankInstructions}` : "");
+/** The TYPE slots where the user uploaded AMP models ({"9": name}), for the prompt (same as ai.amps_context). */
+export function ampsContext(amps) {
+  const keys = Object.keys(amps || {}).filter(k => amps[k]).sort((a, b) => Number(a) - Number(b));
+  if (!keys.length) return "";
+  return "AMP SUBIDOS A ESTA PEDALERA (reemplazan al modelo de fábrica de ese TYPE; ese TYPE de fábrica ya no existe):\n"
+    + keys.map(k => `- TYPE ${k} (amp_type ${Number(k) - 1}): «${amps[k]}»`).join("\n")
+    + "\nSon capturas de amplificadores reales: el nombre dice cuál. Úsalos cuando encajen con el sonido pedido mejor que un "
+    + "modelo de fábrica. La captura ya trae la ganancia del amplificador original: con ellos deja GAIN entre 45 y 75 y ajusta "
+    + "el carácter con TREBLE/MIDDLE/BASS. Si dice CAB, FULL RIG o «con cabina», la captura ya incluye el parlante: usa cab 0 (sin CAB).";
+}
+
+const userPrompt = (description, instrument, bank, amps) => {
+  const context = ampsContext(amps);
+  return `Instrumento: ${instrument}\nSonido deseado: ${description.trim()}` + (context ? `\n\n${context}` : "")
+    + (bank ? `\n\n${AI.bankInstructions}` : "");
+};
 
 /** Self-contained prompt for a chat web page (same text as ai.web_prompt). */
-export function webPrompt(description, instrument, bank = false) {
+export function webPrompt(description, instrument, bank = false, amps = {}) {
   const keys = AI.schema.required.map(k => `"${k}"`).join(", ");
   const shape = bank
     ? `un objeto con "bank_name" (texto) y "presets": una lista de EXACTAMENTE 4 objetos (A, B, C, D), cada uno con exactamente estas claves: ${keys}`
     : `exactamente estas claves: ${keys}`;
-  return `${AI.system}\n\n${userPrompt(description, instrument, bank)}\n\n` +
+  return `${AI.system}\n\n${userPrompt(description, instrument, bank, amps)}\n\n` +
     "Responde ÚNICAMENTE con un bloque de código JSON (```json ... ```) que contenga " +
     `${shape}. Tipos: amp_on/mod_on/dly_on/rvb_on booleanos; mod_type uno de ` +
     "chorus|phaser|tremolo; dly_type uno de analog|tape|dual; rvb_type uno de room|spring|cloud; " +
@@ -165,11 +179,11 @@ async function askOpenAI(cfg, prompt, bank, strict = true) {
 }
 
 /** cfg: {provider, key, model, baseUrl}. Returns {bytes, name, explanation} or {bankName, items}. */
-export async function generate(cfg, description, instrument, bank, likes) {
+export async function generate(cfg, description, instrument, bank, likes, amps = {}) {
   const p = AI.providers[cfg.provider];
   cfg = { ...cfg, model: cfg.model || p.model, baseUrl: (cfg.baseUrl || p.url).replace(/\/+$/, "") };
   if (cfg.provider !== "compatible" && !cfg.key) throw new AIError(`Falta la clave de API de ${p.label}.`);
-  const prompt = userPrompt(description, instrument, bank);
+  const prompt = userPrompt(description, instrument, bank, amps);
   const doc = cfg.provider === "claude" ? await askClaude(cfg, prompt, bank) : await askOpenAI(cfg, prompt, bank);
   return bank ? buildBank(doc, likes) : build(doc, likes[0]);
 }

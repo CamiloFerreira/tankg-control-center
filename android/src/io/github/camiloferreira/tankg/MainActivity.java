@@ -60,7 +60,7 @@ import java.util.Iterator;
  *
  * Bridge (window.AndroidMidi): list() -> JSON [{id, name}], open(id) -> __midiOpened(id, ok, err),
  * send(hex), close(), saveFile(name, base64, mime), httpRequest(id, method, url, headers, body) ->
- * __httpDone(id, status, text), openUrl(url), openChat(package, url, text), copyText(text), version(),
+ * __httpDone(id, status, text) (text is base64 when the headers carry X-Tankg-Base64: 1), openUrl(url), openChat(package, url, text), copyText(text), version(),
  * installUpdate(apkUrl, sumsUrl) -> __updateState(state, detail) (refuses an APK not in SHA256SUMS),
  * blePermission(), blePedals(), bleOpen(address) -> __bleState(state, detail), bleSend(hex),
  * bleClose(); Bluetooth notifications -> __bleIn(hex). Incoming complete SysEx frames ->
@@ -427,6 +427,8 @@ public class MainActivity extends Activity {
                     boolean hasBody = body != null && !body.isEmpty();
                     c.setDoOutput(hasBody);
                     JSONObject h = new JSONObject(headersJson);
+                    boolean binary = "1".equals(h.optString("X-Tankg-Base64"));   // answer as base64 (model files)
+                    h.remove("X-Tankg-Base64");
                     for (Iterator<String> it = h.keys(); it.hasNext(); ) {
                         String k = it.next();
                         c.setRequestProperty(k, h.getString(k));
@@ -438,7 +440,9 @@ public class MainActivity extends Activity {
                     }
                     status = c.getResponseCode();
                     InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
-                    text = in == null ? "" : new String(readAll(in), StandardCharsets.UTF_8);
+                    byte[] raw = in == null ? new byte[0] : readAll(in);
+                    text = binary && status < 400 ? android.util.Base64.encodeToString(raw, android.util.Base64.NO_WRAP)
+                            : new String(raw, StandardCharsets.UTF_8);
                 } catch (Exception e) {
                     text = String.valueOf(e.getMessage());
                 }

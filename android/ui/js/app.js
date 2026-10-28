@@ -2,11 +2,12 @@
 // `device` = last bank read from the pedal, `local` = working copy; "modified" = slots that
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
-import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FACTORY_SETS, FIELDS, ICONS, LEGAL, LIBRARY, MENU, QUICK, QUICK_LABEL,
+import { AI, AMP_MODELS, BAND_PACKS, BYTE_NAMES, CAB_MODELS, FACTORY, FACTORY_SETS, FIELDS, ICONS, LEGAL, LIBRARY, MENU, QUICK, QUICK_LABEL,
   RELEASES_REPO, VERSION } from "./data.js";
 import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 import { fromText as aiFromText, generate as generateAI, webPrompt, zoneGap } from "./ai.js";
-import { parseBankFile, parsePresetFile, parseSetFile, presetFile, setFile, stamp } from "./files.js";
+import { PACK_EXTENSION, communityKey, communityUrl, creditText, fromBase64, packFile, parseBankFile, parsePackFile, parsePresetFile,
+  parseSetFile, presetFile, remapPack, setFile, stamp, toBase64 } from "./files.js";
 import * as cloud from "./cloud.js";
 import * as am4 from "./am4.js";
 
@@ -35,8 +36,17 @@ const store = {
   set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ } },
 };
 const aliasKey = () => (S.demo ? "tankg.aliases.demo" : "tankg.aliases");
-let aliases = { presets: {}, banks: {}, amps: {} };
-const loadAliases = () => { aliases = { presets: {}, banks: {}, amps: {}, ...store.get(aliasKey(), {}) }; };
+let aliases = { presets: {}, banks: {}, amps: {}, ampSources: {} };
+const loadAliases = () => { aliases = { presets: {}, banks: {}, amps: {}, ampSources: {}, ...store.get(aliasKey(), {}) }; };
+/** Name of the model uploaded to a TYPE slot and, if it came from the M-VAVE community, where from (set_amp in library.py). */
+function setAmp(slot, name, source = null) {
+  aliases.amps = { ...(aliases.amps || {}), [String(slot + 1)]: name };
+  const sources = { ...(aliases.ampSources || {}) };
+  if (source) sources[String(slot + 1)] = { article: Number(source.article), file: String(source.file) };
+  else delete sources[String(slot + 1)];
+  aliases.ampSources = sources;
+  saveAliases();
+}
 const saveAliases = () => store.set(aliasKey(), aliases);
 const presetName = s => aliases.presets[slotName(s)] || "";
 const bankName = b => aliases.banks[String(b + 1)] || "";
@@ -55,6 +65,24 @@ const get = (key, s = S.current) => S.local.presets[s][F[key].offset];
 const zoneOf = (f, v) => (f.zones.length ? f.zones[Math.min(2, Math.floor((v * 3) / (f.max + 1)))] : "");
 const ampName = p => AMP_MODELS[p[F.amp_type.offset]] ?? "?";
 const rgbHex = p => "#" + toHex(p.slice(18, 21));
+
+/** The captured amp a pack preset needs when its TYPE now holds something else (Aliases.missing_amp). */
+function missingAmp(s) {
+  const need = S.local && aliases.presetAmps?.[slotName(s)];
+  return need && S.local.presets[s][5] === need.slot && aliases.amps?.[String(need.slot + 1)] !== need.name ? need : null;
+}
+
+async function fixMissingAmp() {
+  const need = missingAmp(S.current);
+  if (!need) return;
+  if (!need.source) return info("AMP del preset", `«${need.name}» vino de un archivo: vuelve a subirlo con Menú → Subir modelo de AMP, o importa de nuevo su pack.`);
+  const amp = { slot: need.slot, name: need.name, data: null, community: need.source };
+  if (!hasModel(amp)) {
+    if (!(await ask("AMP del preset", `«${need.name}» no está en este equipo. ¿Descargarlo de la comunidad de M-VAVE?`))) return;
+    if (!(await downloadModels([amp], "AMP del preset"))) return;
+  }
+  uploadAmpModel({ data: await fetchModel(amp), name: need.name, slot: need.slot, source: need.source });
+}
 
 function pushUndo() {
   S.undo.push({ bank: S.local.copy(), aliases: JSON.stringify(aliases) });
@@ -215,6 +243,10 @@ function render() {
     for (const fd of el.querySelectorAll(".fader")) paintFader(fd, get(fd.dataset.fader));
   }
 
+  const need = missingAmp(S.current);
+  $("ampWarn").hidden = !need;
+  if (need) $("ampWarn").textContent = `⚠ Este preset es para el AMP «${need.name}», pero el TYPE ${need.slot + 1} de la pedalera ahora es `
+    + `«${aliases.amps?.[String(need.slot + 1)] || AMP_MODELS[need.slot]}» y sonará distinto. Toca para subir «${need.name}».`;
   rememberDraft();
   updateActions(mod);
   scheduleLive();
@@ -543,6 +575,25 @@ function renderLibList() {
     root.append(item);
     count++;
   }
+  // band packs with captured amps (references to the M-VAVE community), after the factory-AMP banks
+  const packs = bandPacks().filter(p => !q || `${p.title} ${p.amps.map(a => a.name).join(" ")} ${p.presets.map(x => x.name).join(" ")}`
+    .toLowerCase().includes(q));
+  if (packs.length) {
+    const h = document.createElement("div");
+    h.className = "genre";
+    h.textContent = "★ CON AMP IMPORTADO (COMUNIDAD M-VAVE)";
+    root.append(h);
+    for (const p of packs) {
+      const item = document.createElement("button");
+      item.className = "bank-item";
+      item.innerHTML = "<b></b><small></small>";
+      item.querySelector("b").textContent = `★ ${p.title}${missingModels([p]).length ? "  ⬇" : ""}`;
+      item.querySelector("small").textContent = `AMP: ${p.amps.map(a => a.name).join(" · ")}`;
+      item.onclick = () => { $("libSheet").hidden = true; runPackImport(p); };
+      root.append(item);
+      count++;
+    }
+  }
   if (!count) root.innerHTML = `<p class="muted">Nada coincide con «${q.replace(/[<>&]/g, "")}».</p>`;
 }
 
@@ -591,6 +642,7 @@ async function applyPresets(first, items, bank = "", forceUpload = false) {
   const slots = items.map((it, i) => {
     S.local.presets[first + i] = Uint8Array.from(it.bytes);
     setPresetName(first + i, it.name);
+    delete (aliases.presetAmps || {})[slotName(first + i)];   // no longer the pack preset it was
     return first + i;
   });
   if (bank && items.length === 4 && first % 4 === 0) { aliases.banks[String(first / 4 + 1)] = bank; saveAliases(); }
@@ -715,15 +767,19 @@ function presetMenu(slot) {
 
 // AMP models (.am4data, Bluetooth only; same as the desktop AmpUploadDialog) ---------------------
 
-function pickAmpSlot() {
+// copies of the uploaded models (the pedal can't be read back), so a pack can include them; this device only
+const ampFiles = () => store.get("tankg.ampFiles", {});
+const keepAmpFile = (slot, data) => store.set("tankg.ampFiles", { ...ampFiles(), [slot]: toBase64(data) });
+
+function pickAmpSlot(title = "Espacio de AMP", text = "Elige qué modelo de AMP (perilla TYPE) se reemplaza:", suggested = null) {
   return new Promise(resolve => {
-    modal({ title: "Espacio de AMP", step: "Elige qué modelo de AMP (perilla TYPE) se reemplaza:", cancel: "Cancelar" });
+    modal({ title, step: text, cancel: "Cancelar" });
     const box = document.createElement("div");
     box.className = "acts";
     const current = S.local ? get("amp_type") : -1;
     for (let i = 0; i < AMP_MODELS.length; i++) {
       const b = document.createElement("button");
-      b.textContent = ampLabel(i) + (i === current ? "  (preset actual)" : "");
+      b.textContent = ampLabel(i) + (i === suggested ? "  (el del pack)" : i === current && suggested === null ? "  (preset actual)" : "");
       b.onclick = () => { closeModal(); resolve(i); };
       box.append(b);
     }
@@ -732,20 +788,37 @@ function pickAmpSlot() {
   });
 }
 
-async function uploadAmpModel() {
+/** Other presets that use these TYPE slots: they will sound with the new model (MainWindow.replace_warning). */
+function replaceWarning(ampSlots, exclude = []) {
+  const parts = [...new Set(ampSlots)].sort((a, b) => a - b).flatMap(a => {
+    const used = S.local ? [...Array(SLOTS).keys()].filter(s => S.local.presets[s][5] === a && !exclude.includes(s)) : [];
+    if (!used.length) return [];
+    const shown = used.slice(0, 8).map(slotName).join(", ") + (used.length > 8 ? ` y ${used.length - 8} más` : "");
+    const many = used.length > 1;
+    return [`${used.length} preset${many ? "s" : ""} (${shown}) usa${many ? "n" : ""} el TYPE ${a + 1} («${aliases.amps?.[String(a + 1)] || AMP_MODELS[a]}») `
+      + `y sonará${many ? "n" : ""} con el modelo nuevo`];
+  });
+  return parts.length ? `\n\nOjo: ${parts.join("; ")}. Se puede volver con «Restaurar AMP/CAB de fábrica».` : "";
+}
+
+async function uploadAmpModel(known = null) {
   if (S.busy) return toast("Hay una operación en curso");
-  const f = await pickFile(".am4data,application/octet-stream");
-  if (!f) return;
-  const data = new Uint8Array(await f.arrayBuffer());
-  try { am4.check(data); } catch (e) { return info("Subir modelo de AMP", `${f.name}: ${e.message}`); }
-  const typed = await promptText("Subir modelo de AMP", "Nombre que mostrará la app:", am4.nameFromPath(f.name));
-  if (typed === null) return;
-  const slot = await pickAmpSlot();
-  if (slot === null) return;
-  const name = typed.trim() || `AMP ${slot + 1}`;
-  if (!(await ask("Subir modelo de AMP", `Se reemplazará el ${ampLabel(slot)} de la pedalera por «${name}». Todos los presets `
-    + "que usan ese TYPE sonarán con el modelo nuevo. Para volver al original: Menú → Restaurar AMP/CAB de fábrica.\n"
-    + "¿Continuar?"))) return;
+  let data, name, slot, source = null;
+  if (known) {   // the captured amp a pack preset needs ({data, name, slot, source})
+    ({ data, name, slot, source } = known);
+  } else {
+    const f = await pickFile(".am4data,application/octet-stream");
+    if (!f) return;
+    data = new Uint8Array(await f.arrayBuffer());
+    try { am4.check(data); } catch (e) { return info("Subir modelo de AMP", `${f.name}: ${e.message}`); }
+    const typed = await promptText("Subir modelo de AMP", "Nombre que mostrará la app:", am4.nameFromPath(f.name));
+    if (typed === null) return;
+    slot = await pickAmpSlot();
+    if (slot === null) return;
+    name = typed.trim() || `AMP ${slot + 1}`;
+  }
+  if (!(await ask("Subir modelo de AMP", `Se reemplazará el ${ampLabel(slot)} de la pedalera por «${name}».`
+    + replaceWarning([slot]) + "\n¿Continuar?"))) return;
   if (!S.dev) return info("Subir modelo de AMP", "Pedalera no conectada: enciéndela con Bluetooth y espera a que la app se conecte.");
   S.busy = true;
   modal({ title: "Subiendo modelo de AMP", step: "Calculando el bloque LMT del modelo…", bar: true });
@@ -758,7 +831,8 @@ async function uploadAmpModel() {
       $("mBar").firstElementChild.style.width = `${(n / total) * 100}%`;
       step(text);
     });
-    aliases.amps = { ...(aliases.amps || {}), [String(slot + 1)]: name };
+    setAmp(slot, name, source);   // source: the community publication, if it came from one
+    keepAmpFile(slot, data);
     saveAliases();
     $("mBar").firstElementChild.style.width = "100%";
     step(`✓ AMP ${slot + 1} reemplazado por «${name}»`, "ok");
@@ -820,11 +894,234 @@ async function restoreFactoryAmpCab() {
       S.local = after.copy();
     }
     aliases.amps = {};
+    aliases.ampSources = {};
+    store.set("tankg.ampFiles", {});
     saveAliases();
     store.set("tankg.factorySet", kind);
     $("mBar").firstElementChild.style.width = "100%";
     step(`✓ Pedalera restaurada a fábrica ${label}`, "ok");
   } catch (e) {
+    step(`✗ ${e instanceof DeviceError ? e.message : `Error inesperado: ${e.message}`}`, "bad");
+  } finally {
+    $("mClose").disabled = false;
+    $("mClose").onclick = closeModal;
+    S.busy = false;
+    render();
+  }
+}
+
+// preset packs (.tgpack: presets + the AMP models they use; same as the desktop PackImportDialog) -----
+
+async function exportPack() {
+  const cur = S.current, first = Math.floor(cur / 4) * 4;
+  const scope = await new Promise(resolve => {
+    modal({ title: "Exportar pack", step: "¿Qué guardo en el pack? Van con los modelos de AMP subidos que usen.", cancel: "Cancelar" });
+    const box = document.createElement("div");
+    box.className = "acts";
+    for (const [label, slots] of [[`Este preset (${slotName(cur)})`, [cur]], [`Este banco (${first / 4 + 1}, 4 presets)`, [0, 1, 2, 3].map(i => first + i)],
+      ["Los 36 presets", [...Array(SLOTS).keys()]]]) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.onclick = () => { closeModal(); resolve(slots); };
+      box.append(b);
+    }
+    $("mBody").append(box);
+    $("mClose").onclick = () => { closeModal(); resolve(null); };
+  });
+  if (!scope) return;
+  const title = (scope.length === 1 ? presetName(cur) : scope.length === 4 ? bankName(first / 4) : "Tank-G") || slotName(scope[0]);
+  const models = Object.fromEntries(Object.entries(ampFiles()).map(([k, v]) => [k, fromBase64(v)]));
+  const { text, missing } = packFile(S.local, scope, Object.fromEntries(scope.map(s => [s, presetName(s)])), aliases.banks,
+    aliases.amps || {}, models, title);
+  download(`${safeName(title)}${PACK_EXTENSION}`, text);
+  if (missing.length) info("Exportar pack", `El pack se guardó sin el archivo del AMP ${missing.map(a => a + 1).join(", ")} `
+    + "(subido desde otro equipo o una versión anterior): súbelo de nuevo aquí para incluirlo.");
+}
+
+function pickBank(title) {
+  return new Promise(resolve => {
+    modal({ title, step: "Elige el banco de destino:", cancel: "Cancelar" });
+    const box = document.createElement("div");
+    box.className = "acts";
+    for (let b = 0; b < 9; b++) {
+      const btn = document.createElement("button");
+      btn.textContent = `Banco ${b + 1}${bankName(b) ? ` · ${bankName(b)}` : ""}`;
+      btn.onclick = () => { closeModal(); resolve(b); };
+      box.append(btn);
+    }
+    $("mBody").append(box);
+    $("mClose").onclick = () => { closeModal(); resolve(null); };
+  });
+}
+
+// Models referenced by the band packs come from the M-VAVE community; once downloaded they stay on
+// this device (like library.DATA_DIR/community on the desktop), so the packs work offline.
+const communityModels = () => store.get("tankg.communityModels", {});
+const hasModel = amp => !!amp.data || !!communityModels()[communityKey(amp.community)];
+const missingModels = packs => {
+  const seen = new Set();
+  return packs.flatMap(p => p.amps).filter(a => !hasModel(a) && !seen.has(communityKey(a.community)) && seen.add(communityKey(a.community)));
+};
+const bandPacks = () => BAND_PACKS.map(doc => parsePackFile(JSON.stringify(doc)));
+
+async function fetchModel(amp) {
+  if (amp.data) return amp.data;
+  const key = communityKey(amp.community), kept = communityModels()[key];
+  if (kept) return (amp.data = fromBase64(kept));
+  let { status, bytes } = await cloud.getBinary(communityUrl(amp.community));
+  if (status === 0) ({ status, bytes } = await cloud.getBinary(communityUrl(amp.community)));   // one retry: a hiccup right after start
+  if (status !== 200 || !bytes) throw new DeviceError(`No se pudo descargar «${amp.name}» de la comunidad de M-VAVE (${status || "sin conexión"}).`);
+  am4.check(bytes);
+  store.set("tankg.communityModels", { ...communityModels(), [key]: toBase64(bytes) });
+  return (amp.data = bytes);
+}
+
+async function downloadModels(amps, title) {
+  modal({ title, step: "Descargando de la comunidad de M-VAVE…", bar: true });
+  $("mClose").disabled = true;
+  try {
+    for (const [i, amp] of amps.entries()) {
+      $("mStep").textContent = `«${amp.name}» (${i + 1} de ${amps.length})…`;
+      $("mBar").firstElementChild.style.width = `${(i / amps.length) * 100}%`;
+      await fetchModel(amp);
+    }
+    closeModal();
+    return true;
+  } catch (e) {
+    $("mStep").textContent = `✗ ${e.message}`;
+    $("mStep").className = "bad";
+    $("mClose").onclick = closeModal;
+    return false;
+  } finally {
+    $("mClose").disabled = false;
+  }
+}
+
+async function downloadBandAmps() {
+  const todo = missingModels(bandPacks());
+  if (!todo.length) return info("Descargar AMP", "Ya están en este equipo todos los modelos de los packs de bandas.");
+  if (!(await ask("Descargar AMP", `Se descargarán ${todo.length} modelos de AMP de la comunidad de M-VAVE (capturas de sus autores, `
+    + "~8 KB cada uno) y quedarán en este equipo. ¿Continuar?"))) return;
+  if (await downloadModels(todo, "Descargar AMP")) toast(`${todo.length} modelos descargados: los packs de bandas ya funcionan sin conexión.`, 4500);
+}
+
+function openBandPacks() {
+  const packs = bandPacks();
+  if (!packs.length) return info("Packs de bandas", "Esta versión no trae packs de bandas.");
+  modal({ title: "Packs de bandas con AMP", cancel: "Cerrar",
+    step: "Un banco de 4 presets con el ampli de cada banda. Los modelos son capturas de la comunidad de M-VAVE: se descargan con su autor." });
+  const box = document.createElement("div");
+  box.className = "acts";
+  for (const p of packs) {
+    const b = document.createElement("button");
+    b.textContent = `${p.title} — ${p.amps.map(a => a.name).join(", ")}${missingModels([p]).length ? "  (falta descargar)" : ""}`;
+    b.onclick = () => { closeModal(); runPackImport(p); };
+    box.append(b);
+  }
+  $("mBody").append(box);
+  $("mClose").onclick = closeModal;
+}
+
+async function importPack() {
+  if (S.busy) return toast("Hay una operación en curso");
+  const f = await pickFile(".tgpack,application/json,application/octet-stream");
+  if (!f) return;
+  let pack;
+  try { pack = parsePackFile(await f.text()); } catch (e) { return info("Importar pack", `${f.name}: ${e.message}`); }
+  return runPackImport(pack);
+}
+
+async function runPackImport(pack) {
+  if (S.busy) return toast("Hay una operación en curso");
+  const what = { preset: "1 preset", bank: "un banco de 4 presets", all: "los 36 presets" }[pack.kind] || `${pack.presets.length} presets`;
+  const title = `Importar pack${pack.title ? ` «${pack.title}»` : ""}`;
+  if (!S.local) return info(title, "Conecta la pedalera (o abre un banco) antes de importar un pack.");
+  // where the presets go
+  let dest = pack.presets.map(p => p.slot);
+  if (pack.kind === "preset") {
+    const s = await pickSlot(`${title}: preset de destino`, -1);
+    if (s === null) return;
+    dest = [s];
+  } else if (pack.kind === "bank") {
+    const b = await pickBank(`${title}: banco de destino`);
+    if (b === null) return;
+    dest = [0, 1, 2, 3].map(i => b * 4 + i);
+  }
+  // where each AMP model goes (the pack's slot by default; another one remaps the presets)
+  const moves = {};
+  for (const amp of pack.amps) {
+    const to = await pickAmpSlot(`AMP «${amp.name}»`, "¿En qué espacio de AMP (TYPE) lo pongo? Los presets del pack se ajustan solos.", amp.slot);
+    if (to === null) return;
+    moves[amp.slot] = to;
+  }
+  if (new Set(Object.values(moves)).size < Object.keys(moves).length) return info(title, "Dos modelos no pueden ir al mismo espacio de AMP.");
+  const records = remapPack(pack.presets.map(p => p.record), moves);
+  const names = () => {
+    pack.presets.forEach((p, i) => setPresetName(dest[i], p.name || ""));
+    const shift = Object.fromEntries(pack.presets.map((p, i) => [Math.floor(p.slot / 4), Math.floor(dest[i] / 4)]));
+    for (const [b, name] of Object.entries(pack.banks)) if (shift[Number(b) - 1] !== undefined) aliases.banks[String(shift[Number(b) - 1] + 1)] = name;
+    saveAliases();
+  };
+  if (!pack.amps.length) {   // no models: into the editor, like a .tgset
+    if (!S.local) return info(title, "Conecta la pedalera o abre un banco primero.");
+    pushUndo();
+    records.forEach((r, i) => { S.local.presets[dest[i]] = r; });
+    names();
+    render();
+    return toast(`Pack cargado (${what}). «Guardar» lo pasa a la pedalera.`, 4500);
+  }
+  const todo = missingModels([pack]);
+  if (todo.length) {
+    if (!(await ask(title, `Faltan en este equipo ${todo.length} modelo${todo.length > 1 ? "s" : ""} de AMP de este pack `
+      + `(${todo.map(a => a.name).join(", ")}).\n¿Descargarlos ahora de la comunidad de M-VAVE?`))) return;
+    if (!(await downloadModels(todo, title))) return;
+  }
+  for (const amp of pack.amps) await fetchModel(amp);
+  const credits = pack.amps.map(a => creditText(a) && `• ${a.name}: ${creditText(a)}`).filter(Boolean);
+  const amps = Object.values(moves).sort((a, b) => a - b).map(s => `AMP ${s + 1}`).join(", ");
+  if (!(await ask(title, `Trae ${what} y ${pack.amps.length} modelo${pack.amps.length > 1 ? "s" : ""} de AMP. Se reemplazarán en la pedalera `
+    + `${amps} y los presets ${dest.length <= 4 ? dest.map(slotName).join(", ") : "de los 36 slots"} (antes se hace un backup).`
+    + replaceWarning(Object.values(moves), dest)
+    + (credits.length ? `\n\nModelos de sus autores (comunidad de M-VAVE):\n${credits.join("\n")}` : "") + "\n\n¿Continuar?"))) return;
+  if (!S.dev) return info(title, "Pedalera no conectada: enciéndela con Bluetooth y espera a que la app se conecte.");
+  S.busy = true;
+  modal({ title, step: "Backup previo del banco…", bar: true });
+  $("mClose").disabled = true;
+  const step = (text, cls = "") => { $("mStep").textContent = text; $("mStep").className = cls; };
+  const bar = v => { $("mBar").firstElementChild.style.width = `${v * 100}%`; };
+  try {
+    const before = await S.dev.readBank();
+    backup(before, "auto");
+    for (const [n, amp] of pack.amps.entries()) {
+      const slot = moves[amp.slot];
+      await S.dev.uploadAmp(slot, am4.uploadPayload(amp.data), (i, t, text) => {
+        bar(((n + i / t) / (pack.amps.length + 1)) * 0.9);
+        step(`AMP ${n + 1} de ${pack.amps.length} «${amp.name}» → espacio ${slot + 1}: ${text}`);
+      });
+      setAmp(slot, amp.name, amp.community);
+      keepAmpFile(slot, amp.data);
+    }
+    const target = before.copy();
+    records.forEach((r, i) => { target.presets[dest[i]] = r; });
+    const after = await S.dev.writePresets(target, dest, (n, t, s) => {
+      bar(0.9 + (n / (t + 1)) * 0.1);
+      step(s === null ? "Verificando los presets…" : `Preset ${n + 1} de ${t}…`);
+    });
+    if (S.local) { pushUndo(); dest.forEach(s => { S.local.presets[s] = Uint8Array.from(after.presets[s]); }); } else S.local = after.copy();
+    S.device = after;
+    names();
+    const models = Object.fromEntries(pack.amps.map(a => [moves[a.slot], a]));
+    aliases.presetAmps = { ...(aliases.presetAmps || {}) };
+    records.forEach((r, i) => {
+      const a = models[r[5]];
+      if (a) aliases.presetAmps[slotName(dest[i])] = { slot: r[5], name: a.name, source: a.community };
+      else delete aliases.presetAmps[slotName(dest[i])];
+    });
+    saveAliases();
+    bar(1);
+    step(`✓ Pack importado: ${pack.amps.length} AMP y ${dest.length} preset${dest.length > 1 ? "s" : ""}, verificados`, "ok");
+  } catch (e) {
+    saveAliases();
     step(`✗ ${e instanceof DeviceError ? e.message : `Error inesperado: ${e.message}`}`, "bad");
   } finally {
     $("mClose").disabled = false;
@@ -846,7 +1143,9 @@ function pickFile(accept) {
   });
 }
 
-function download(name, data, mime = "application/octet-stream") {   // saved in Downloads by MainActivity
+// Saved in Downloads by MainActivity. Always as octet-stream: with another type (application/json)
+// Android appends its extension and «banco.tgset» became «banco.tgset.json».
+function download(name, data, mime = "application/octet-stream") {
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
   let bin = "";
   bytes.forEach(b => { bin += String.fromCharCode(b); });
@@ -901,6 +1200,8 @@ function restoreFactory(slots) {
   const factory = Bank.fromBytes(fromHex(factoryHex()));
   pushUndo();
   for (const s of slots) S.local.presets[s] = Uint8Array.from(factory.presets[s]);
+  for (const s of slots) delete (aliases.presetAmps || {})[slotName(s)];
+  saveAliases();
   render();
   toast("Presets de fábrica cargados en el editor. «Guardar» los pasa a la pedalera.");
 }
@@ -1085,7 +1386,7 @@ async function aiGenerate() {
   btn.textContent = "Generando…";
   try {
     aiShow(await generateAI({ provider: $("aiProvider").value, key: $("aiKey").value.trim(), model: $("aiModel").value.trim(),
-      baseUrl: $("aiUrl").value.trim() }, text, $("aiInstrument").value, aiBank(), aiLikes()));
+      baseUrl: $("aiUrl").value.trim() }, text, $("aiInstrument").value, aiBank(), aiLikes(), aliases.amps || {}));
   } catch (e) {
     info("Crear con IA", e.message);
   } finally {
@@ -1098,7 +1399,7 @@ function aiCopy() {
   const text = $("aiText").value.trim();
   if (!text) return toast("Describe primero el sonido.");
   aiSave();
-  const prompt = webPrompt(text, $("aiInstrument").value, aiBank());
+  const prompt = webPrompt(text, $("aiInstrument").value, aiBank(), aliases.amps || {});
   A.copyText(prompt);
   const site = $("aiSite").value, url = AI.webSites[site];
   const where = A.openChat(AI.chatApps[site]?.android || "", url, prompt);
@@ -1168,7 +1469,7 @@ const C = { started: false, ready: false, busy: false, timer: 0 };
 const cloudStatus = text => { $("cloudStatus").textContent = text; $("cloudStatus").hidden = !text; };
 const cloudDoc = () => {
   const bank = S.local || S.device;
-  return bank && !S.demo ? cloud.makeDoc(bank, aliases.presets, aliases.banks, aliases.amps) : null;
+  return bank && !S.demo ? cloud.makeDoc(bank, aliases.presets, aliases.banks, aliases.amps, aliases.ampSources, aliases.presetAmps) : null;
 };
 
 function scheduleCloud(ms = 2500) {
@@ -1263,11 +1564,27 @@ async function cloudPush(quiet = true) {
 function loadCloud(r) {
   if (S.local) pushUndo();
   S.local = r.bank;
-  aliases = { ...aliases, presets: r.presets, banks: r.banks, amps: r.amps || {} };
+  aliases = { ...aliases, presets: r.presets, banks: r.banks, amps: r.amps || {}, ampSources: r.ampSources || {}, presetAmps: r.presetAmps || {} };
   saveAliases();
   render();
+  setTimeout(offerCloudModels, 300);
   const n = modified().length;
   toast(`Presets de la nube cargados${n ? `: ${n} distintos de la pedalera, «Guardar» los pasa` : ""}.`, 4500);
+}
+
+/** The cloud version uses AMP models uploaded elsewhere from the M-VAVE community: offer to download
+ *  the ones this device lacks (same as _offer_cloud_models on the desktop). */
+async function offerCloudModels() {
+  const files = ampFiles();
+  const todo = Object.entries(aliases.ampSources || {}).filter(([slot]) => !files[Number(slot) - 1])
+    .map(([slot, ref]) => ({ slot: Number(slot) - 1, name: aliases.amps?.[slot] || `AMP ${slot}`, data: null, community: ref }));
+  if (!todo.length || S.busy) return;
+  if (!(await ask("Nube", `La versión de la nube usa ${todo.length} modelo${todo.length > 1 ? "s" : ""} de AMP de la comunidad de M-VAVE `
+    + `que este equipo no tiene (${todo.map(a => a.name).join(", ")}).\n¿Descargarlos ahora?`))) return;
+  if (await downloadModels(todo, "Nube")) {
+    for (const a of todo) keepAmpFile(a.slot, await fetchModel(a));
+    toast(`${todo.length} modelos de AMP descargados de la comunidad`);
+  }
 }
 
 async function cloudCheck({ manual = false, afterConnect = false } = {}) {
@@ -1334,7 +1651,7 @@ function menuState() {
     paste: !S.clipboard, revert: !curMod, revertAll: !n, backupNow: !dev, restoreFile: !dev, ampUpload: !dev, factoryAmpCab: !dev,
     cloudPush: !has, cloudPull: !has };
   for (const c of ["copy", "duplicate", "swap", "left", "right", "renameBank", "library", "ai", "factory", "factoryBank", "factoryAll",
-    "saveBank", "importPreset", "exportPreset", "importSet", "exportSet", "compare", "bytes"]) off[c] = off[c] || !has;
+    "saveBank", "importPreset", "exportPreset", "importSet", "exportSet", "compare", "bytes", "exportPack"]) off[c] = off[c] || !has;
   for (const b of $("menuBody").querySelectorAll("[data-cmd]")) {
     const c = b.dataset.cmd;
     b.disabled = !!off[c];
@@ -1377,7 +1694,7 @@ function openMenu() {
 
 async function run(cmd) {
   $("menuSheet").hidden = true;
-  const needLocal = !["read", "demo", "about", "view", "port", "ampUpload", "factoryAmpCab", "update", "calibrate", "backups", "cloudConnect", "cloudDisconnect"].includes(cmd);
+  const needLocal = !["read", "demo", "about", "view", "port", "ampUpload", "factoryAmpCab", "importPack", "bandPacks", "downloadAmps", "update", "calibrate", "backups", "cloudConnect", "cloudDisconnect"].includes(cmd);
   if (needLocal && !S.local) return info("Sin datos", "Conecta la pedalera o abre un archivo de banco.");
   const cur = S.current, bankFirst = Math.floor(cur / 4) * 4;
   switch (cmd) {
@@ -1408,6 +1725,10 @@ async function run(cmd) {
     }
     case "port": return openPorts();
     case "ampUpload": return uploadAmpModel();
+    case "importPack": return importPack();
+    case "bandPacks": return openBandPacks();
+    case "downloadAmps": return downloadBandAmps();
+    case "exportPack": return exportPack();
     case "factoryAmpCab": return restoreFactoryAmpCab();
     case "calibrate": $("calSheet").hidden = false; return;
     case "undo": return $("undo").click();
@@ -1449,7 +1770,7 @@ async function run(cmd) {
     case "openBank": { const b = await openBankFile(); if (b) loadLocalBank(b, "Banco abierto. «Guardar» lo pasa a la pedalera."); return; }
     case "saveBank": return download(`tankg-${stamp()}.tgbank`, S.local.toBytes());
     case "importPreset": {
-      const f = await pickFile(".tgpreset,application/json");
+      const f = await pickFile(".tgpreset,application/json,application/octet-stream");
       if (!f) return;
       try {
         const { record, name } = parsePresetFile(await f.text());
@@ -1461,10 +1782,10 @@ async function run(cmd) {
     }
     case "exportPreset": {
       const name = presetName(cur);
-      return download(safeName(`${slotName(cur)} ${name}`) + ".tgpreset", presetFile(S.local.presets[cur], cur, name), "application/json");
+      return download(safeName(`${slotName(cur)} ${name}`) + ".tgpreset", presetFile(S.local.presets[cur], cur, name));
     }
     case "importSet": {
-      const f = await pickFile(".tgset,application/json");
+      const f = await pickFile(".tgset,application/json,application/octet-stream");
       if (!f) return;
       let set;
       try { set = parseSetFile(await f.text()); } catch (e) { return info("Error", `${f.name}: ${e.message}`); }
@@ -1477,7 +1798,7 @@ async function run(cmd) {
     }
     case "exportSet": {
       const b = Math.floor(cur / 4), title = bankName(b) || `Banco ${b + 1}`, slots = [0, 1, 2, 3].map(i => b * 4 + i);
-      return download(safeName(title) + ".tgset", setFile(S.local, slots, slots.map(presetName), title), "application/json");
+      return download(safeName(title) + ".tgset", setFile(S.local, slots, slots.map(presetName), title));
     }
     case "compare": { const other = await openBankFile(); if (other) showText("Comparación", diffText(other, "Archivo → editor")); return; }
     case "bytes": {
@@ -1525,6 +1846,7 @@ function wire() {
   $("connect").onclick = $("connectBig").onclick = () => connect();
   $("demoBig").onclick = startDemo;
   $("menuBtn").onclick = openMenu;
+  $("ampWarn").onclick = fixMissingAmp;
   $("menuSheet").onclick = e => { const b = e.target.closest("[data-cmd]"); if (b && !b.disabled) run(b.dataset.cmd); };
   $("menuSearch").oninput = filterMenu;
   $("menuShade").onclick = () => { $("menuSheet").hidden = true; };
@@ -1611,7 +1933,7 @@ function wire() {
     const u = S.undo.pop();
     if (!u) return;
     S.local = u.bank;
-    aliases = { ...JSON.parse(u.aliases), amps: aliases.amps };   // the AMP models live in the pedal, not in the undo history
+    aliases = { ...JSON.parse(u.aliases), amps: aliases.amps, ampSources: aliases.ampSources };   // the AMP models live in the pedal
     saveAliases();
     render();
   };

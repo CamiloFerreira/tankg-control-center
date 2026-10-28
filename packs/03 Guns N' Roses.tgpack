@@ -1,0 +1,67 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Guns N' Roses",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Patience",
+   "raw": "01000001060116443e3c58040004003a1c0200c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "Welcome to the Jungle",
+   "raw": "0100000112083c44423e5c040004000b0e00ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Paradise City",
+   "raw": "010000011408424640405c040004000b0e00ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo Sweet Child",
+   "raw": "01000101100742464a3c640400383e0e1400ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Guns N' Roses"
+ },
+ "amps": [
+  {
+   "slot": 8,
+   "name": "Silver Jubilee Boost",
+   "credit": {
+    "author": "Bzudo",
+    "title": "Marshall Silver Jubilee 87 | Slash Tokyo '92 - AM4",
+    "file": "Silver_Jubilee_1987_Tweaked_Settings_CAB_BOOST_A2.am4Data",
+    "source": "community.m-vave.com · publicación #10830",
+    "original": [
+     "https://www.tone3000.com/tones/marshall-silver-jubilee-2555-1987-2551bv-cabinet-1987-slash-1992-tokyo-68855"
+    ]
+   },
+   "community": {
+    "article": 10830,
+    "file": "9d6bd719-480c-422b-9b66-1d674cfd9388_Silver_Jubilee_1987_Tweaked_Settings_CAB_BOOST_A2.am4Data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "Silver Jubilee (Slash)",
+   "credit": {
+    "author": "Bzudo",
+    "title": "Marshall Silver Jubilee 87 | Slash Tokyo '92 - AM4",
+    "file": "Silver_Jubilee_1987_Slash_Settings_CAB.am4Data",
+    "source": "community.m-vave.com · publicación #10830",
+    "original": [
+     "https://www.tone3000.com/tones/marshall-silver-jubilee-2555-1987-2551bv-cabinet-1987-slash-1992-tokyo-68855"
+    ]
+   },
+   "community": {
+    "article": 10830,
+    "file": "d1792e33-ba2e-402c-bcd5-60034e5d412b_Silver_Jubilee_1987_Slash_Settings_CAB.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

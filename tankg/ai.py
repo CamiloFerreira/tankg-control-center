@@ -400,24 +400,40 @@ def _checked(cfg: AIConfig) -> AIConfig:
     return cfg
 
 
-def _user_prompt(description: str, instrument: str, bank: bool) -> str:
+def amps_context(amps: dict | None) -> str:
+    """What the pedal really has in the TYPE slots where the user uploaded AMP models ({"9": name}):
+    captures of real amps that replace the factory model of that slot (same as ampsContext in ai.js)."""
+    if not amps:
+        return ""
+    lines = [f"- TYPE {k} (amp_type {int(k) - 1}): «{v}»" for k, v in sorted(amps.items(), key=lambda kv: int(kv[0]))]
+    return ("AMP SUBIDOS A ESTA PEDALERA (reemplazan al modelo de fábrica de ese TYPE; ese TYPE de fábrica ya no "
+            "existe):\n" + "\n".join(lines) + "\nSon capturas de amplificadores reales: el nombre dice cuál. Úsalos cuando "
+            "encajen con el sonido pedido mejor que un modelo de fábrica. La captura ya trae la ganancia del amplificador "
+            "original: con ellos deja GAIN entre 45 y 75 y ajusta el carácter con TREBLE/MIDDLE/BASS. Si dice CAB, FULL RIG "
+            "o «con cabina», la captura ya incluye el parlante: usa cab 0 (sin CAB).")
+
+
+def _user_prompt(description: str, instrument: str, bank: bool, amps: dict | None = None) -> str:
+    context = amps_context(amps)
     return (f"Instrumento: {instrument}\nSonido deseado: {description.strip()}"
+            + (f"\n\n{context}" if context else "")
             + (f"\n\n{BANK_INSTRUCTIONS}" if bank else ""))
 
 
-def generate(cfg: AIConfig, description: str, instrument: str, like: Preset | None = None) -> tuple[Preset, str, str]:
-    """One preset: returns (preset, name, explanation)."""
+def generate(cfg: AIConfig, description: str, instrument: str, like: Preset | None = None,
+             amps: dict | None = None) -> tuple[Preset, str, str]:
+    """One preset: returns (preset, name, explanation). `amps`: uploaded models ({"9": name})."""
     cfg = _checked(cfg)
-    prompt = _user_prompt(description, instrument, False)
+    prompt = _user_prompt(description, instrument, False, amps)
     design = _ask_claude(cfg, prompt) if cfg.provider == "claude" else _ask_openai(cfg, prompt)
     return _build(design, like)
 
 
-def generate_bank(cfg: AIConfig, description: str, instrument: str,
-                  likes: list[Preset | None]) -> tuple[str, list[tuple[Preset, str, str]]]:
+def generate_bank(cfg: AIConfig, description: str, instrument: str, likes: list[Preset | None],
+                  amps: dict | None = None) -> tuple[str, list[tuple[Preset, str, str]]]:
     """A bank of 4: returns (bank name, [(preset, name, explanation)] for A..D)."""
     cfg = _checked(cfg)
-    prompt = _user_prompt(description, instrument, True)
+    prompt = _user_prompt(description, instrument, True, amps)
     doc = _ask_claude(cfg, prompt, BANK_SCHEMA) if cfg.provider == "claude" else \
         _ask_openai(cfg, prompt, schema=BANK_SCHEMA)
     return _build_bank(doc, likes)
@@ -437,13 +453,13 @@ def describe(preset: Preset) -> str:
             f"REVERB {onoff('rvb_on')}: DECAY {g('rvb_decay')} MIX {g('rvb_mix')}")
 
 
-def web_prompt(description: str, instrument: str, bank: bool = False) -> str:
+def web_prompt(description: str, instrument: str, bank: bool = False, amps: dict | None = None) -> str:
     """Self-contained prompt for a chat web page (browser mode)."""
     keys = ", ".join(f'"{k}"' for k in SCHEMA["required"])
     shape = (f'un objeto con "bank_name" (texto) y "presets": una lista de EXACTAMENTE 4 objetos (A, B, C, D), '
              f"cada uno con exactamente estas claves: {keys}") if bank else \
         f"exactamente estas claves: {keys}"
-    return (f"{system_prompt()}\n\n{_user_prompt(description, instrument, bank)}\n\n"
+    return (f"{system_prompt()}\n\n{_user_prompt(description, instrument, bank, amps)}\n\n"
             "Responde ÚNICAMENTE con un bloque de código JSON (```json ... ```) que contenga "
             f"{shape}. Tipos: amp_on/mod_on/dly_on/rvb_on booleanos; mod_type uno de "
             "chorus|phaser|tremolo; dly_type uno de analog|tape|dual; rvb_type uno de room|spring|cloud; "

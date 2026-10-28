@@ -1,0 +1,63 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Metallica",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Fade to Black",
+   "raw": "01010101060014463c3a58101e0c373c1e0300c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "Master of Puppets",
+   "raw": "010000012a0840482c4c5c040004000b0e03ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Enter Sandman",
+   "raw": "010000012a073e46324c5c040004000b0e03ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo Kirk",
+   "raw": "010001011a08484a4442640400383c0e1403ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Metallica"
+ },
+ "amps": [
+  {
+   "slot": 8,
+   "name": "Mesa Dual Rect Modern",
+   "credit": {
+    "author": "Hilmywahid",
+    "title": "Mesa Boogie Dual Rectifier AM4Data",
+    "file": "Dual Rect - Ch 2 Modern.am4Data",
+    "source": "community.m-vave.com · publicación #5880",
+    "original": []
+   },
+   "community": {
+    "article": 5880,
+    "file": "67cf4cfb-cb72-4dd2-93f7-68fe51620a5f_Dual Rect - Ch 2 Modern.am4Data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "Master of Puppets",
+   "credit": {
+    "author": "RyAnjos",
+    "title": "Master Of Puppets - Metallica MAX AM4",
+    "file": "9583ef49-2e63-4da8-ab2a-b31e9ca6c3e5.am4Data",
+    "source": "community.m-vave.com · publicación #11546",
+    "original": []
+   },
+   "community": {
+    "article": 11546,
+    "file": "9583ef49-2e63-4da8-ab2a-b31e9ca6c3e5.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}

@@ -1,0 +1,63 @@
+{
+ "format": "tankg-pack",
+ "version": 1,
+ "title": "Pantera",
+ "presets": [
+  {
+   "slot": "1A",
+   "name": "Cemetery Gates",
+   "raw": "01010101040012463a3c58101e0c320e140500c8ff"
+  },
+  {
+   "slot": "1B",
+   "name": "Cowboys from Hell",
+   "raw": "010000012e08404a2e4e5c040004000b0e03ff0000"
+  },
+  {
+   "slot": "1C",
+   "name": "Walk",
+   "raw": "010000002c073e46324a5c04000400040003ff6e00"
+  },
+  {
+   "slot": "1D",
+   "name": "Solo Dimebag",
+   "raw": "010001011e084a4c4246640400383e0e1403ff008c"
+  }
+ ],
+ "banks": {
+  "1": "Pantera"
+ },
+ "amps": [
+  {
+   "slot": 8,
+   "name": "Randall Dimebag Walk",
+   "credit": {
+    "author": "NowRyd",
+    "title": "randall dimebag walk etc.",
+    "file": "randall.am4Data",
+    "source": "community.m-vave.com · publicación #10062",
+    "original": []
+   },
+   "community": {
+    "article": 10062,
+    "file": "e4eed9e6-da7b-4b48-85e8-c5456895d201_randall.am4Data"
+   }
+  },
+  {
+   "slot": 9,
+   "name": "Randall RG100ES '87",
+   "credit": {
+    "author": "CtrlEscape",
+    "title": "Randall RG100ES (1987)",
+    "file": "randall.am4Data",
+    "source": "community.m-vave.com · publicación #7414",
+    "original": []
+   },
+   "community": {
+    "article": 7414,
+    "file": "b63088e9-7a49-4d4c-9973-1e616ea72180_randall.am4Data"
+   }
+  }
+ ],
+ "source": "Modelos de AMP: capturas de sus autores publicadas en la comunidad de M-VAVE (community.m-vave.com); ver «credit» de cada uno. Solo para uso personal."
+}
