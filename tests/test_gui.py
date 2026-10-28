@@ -249,12 +249,16 @@ def test_command_menu_covers_every_command_and_searches(env):
         d = dialogs.CommandMenu(w)
         d.show()
         d.search.setText("fabrica amp")   # accents are ignored, every word must match
-        visible = [c for row, c, _ in d.rows if row.isVisible()]
+        visible = [c for row, c, _ in d.rows if not row.isHidden()]
         assert visible == ["ampUpload", "factoryAmpCab"] and d.quick.isHidden()
         d.search.returnPressed.emit()
         _, _, wait, _ = env
-        assert wait(lambda: ran == ["ampUpload"]) and not d.isVisible()
-    d = dialogs.CommandMenu(w)
+        assert wait(lambda: ran == ["ampUpload"]) and d.isHidden() and w.command_menu is None
+    w.toggle_menu()   # «☰ Menú» opens the panel inside the window and closes it again
+    d = w.command_menu
+    assert d is not None and d.parent() is w and not w.menuBar().isVisible()
     rows = {c: row for row, c, _ in d.rows}
     assert not rows["paste"].isEnabled()                                         # nothing copied yet
     assert rows["cloudConnect"].property("available") and not rows["cloudPush"].property("available")
+    w.toggle_menu()
+    assert w.command_menu is None

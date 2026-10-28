@@ -52,21 +52,21 @@ Windows/Linux (`tankg/`, PySide6) and Android (`android/`) are the same product.
 
 | Feature | Desktop | Android |
 |---|---|---|
-| Command menu with search (every action, `tankg/menu.py`) | toolbar «☰ Menú», Ctrl+Shift+P (`dialogs.CommandMenu`) | ⋮ menu (sheet; side panel on tablets) |
-| Read / save all / save one / activate | toolbar, Pedalera menu | toolbar (tablet), bottom bar, menu, footswitches |
+| Command menu with search (every action, `tankg/menu.py`; there is no menu bar) | toolbar «☰ Menú», Ctrl+Shift+P: panel over the editor (`dialogs.CommandMenu`) | ⋮ menu (sheet; side panel on tablets) |
+| Read / save all / save one / activate | toolbar, ☰ Menú | toolbar (tablet), bottom bar, menu, footswitches |
 | Live audition | toolbar toggle | menu → Escucha en vivo |
-| Backups (auto, manual, manager, restore file) | Pedalera menu, `BackupManager` | menu → backups sheet, download `.tgbank` |
+| Backups (auto, manual, manager, restore file) | ☰ Menú, `BackupManager` | menu → backups sheet, download `.tgbank` |
 | MIDI port / Bluetooth pedal choice | `MidiPortDialog` (scan with bleak) | port sheet (bonded pedals) |
 | Calibration wizard | `CalibrationWizard` | calibration sheet |
-| Undo, copy/paste, duplicate, swap, move | Editar menu, right click | menu, long press |
+| Undo, copy/paste, duplicate, swap, move | ☰ Menú, shortcuts, right click | menu, long press |
 | Preset / bank names, LED colour | alias field, bank head, LED button | alias field, bank tag, LED button |
 | Band library | `ArtistLibrary` | library sheet |
 | AI (browser + API keys) | `AIDialog` | AI sheet (`ai.js`; native HTTP bridge in the APK) |
-| Factory restore (preset/bank/all), revert | Editar menu | menu |
-| Files: open/save bank, import/export preset and set, compare | Archivo menu | menu (file picker / Downloads) |
-| Bytes of the preset, about, updates | Ayuda menu | menu |
-| AMP model upload, factory AMP/CAB restore (AM4/AM3, Bluetooth) | Pedalera menu, `AmpUploadDialog`, `FactoryAmpCabDialog` | menu |
-| Google Drive sync (auto push after a verified save, offer newer version at start, history) | Nube menu (`tankg/cloud.py`, `dialogs.CloudSignIn` code) | menu → Nube (`cloud.js`, device-flow code) |
+| Factory restore (preset/bank/all), revert | ☰ Menú, right click | menu |
+| Files: open/save bank, import/export preset and set, compare | ☰ Menú, Ctrl+O/S/I/E | menu (file picker / Downloads) |
+| Bytes of the preset, about, updates | ☰ Menú | menu |
+| AMP model upload, factory AMP/CAB restore (AM4/AM3, Bluetooth) | ☰ Menú, `AmpUploadDialog`, `FactoryAmpCabDialog` | menu |
+| Google Drive sync (editor mirrored after every change, cloud version loaded at start, history) | ☰ Menú · Nube (`tankg/cloud.py`, `dialogs.CloudSignIn` code) | menu → Nube (`cloud.js`, device-flow code) |
 
 ## Protocol facts and rules
 

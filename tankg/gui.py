@@ -400,6 +400,7 @@ class MainWindow(QMainWindow):
         self.conn.setObjectName("conn")
         self.statusBar().addPermanentWidget(self.conn)
         # Google Drive: the editor is mirrored a moment after every change once the startup sync is done
+        self.command_menu = None   # dialogs.CommandMenu while it is open
         self.cloud_label = QLabel("")
         self.cloud_label.setObjectName("hint")
         self.statusBar().addPermanentWidget(self.cloud_label)
@@ -609,8 +610,7 @@ class MainWindow(QMainWindow):
             return a
 
         self.act: dict[str, QAction] = {}
-        act("menu", "☰ Menú", lambda: dialogs.CommandMenu(self).exec(), "Ctrl+Shift+P",
-            "Todas las acciones, con buscador (Ctrl+Shift+P)")
+        act("menu", "☰ Menú", self.toggle_menu, "Ctrl+Shift+P", "Todas las acciones, con buscador (Ctrl+Shift+P)")
         act("read", "Leer pedalera", self.read_device, "F5", "Leer los 36 presets de la pedalera (F5)")
         act("send_all", "Guardar cambios", self.send_all, "Ctrl+Return",
             "Subir a la pedalera todos los presets modificados (Ctrl+Enter)")
@@ -661,55 +661,37 @@ class MainWindow(QMainWindow):
         tb.addAction(self.live_action)
 
     def _build_menus(self) -> None:
-        a = self.act
-        mb = self.menuBar()
-        m = mb.addMenu("&Archivo")
-        self._action(m, "Abrir banco…", self.open_bank, "Ctrl+O")
-        self._action(m, "Guardar banco como…", self.save_bank, "Ctrl+S")
-        m.addSeparator()
-        self._action(m, "Importar preset…", self.import_preset, "Ctrl+I")
-        self._action(m, "Exportar preset…", self.export_preset, "Ctrl+E")
-        self._action(m, "Importar banco de 4 (.tgset)…", self.import_bank_set)
-        self._action(m, "Exportar banco de 4 (.tgset)…", self.export_bank_set)
-        m.addSeparator()
-        self._action(m, "Comparar con archivo de banco…", self.compare_file)
-        m.addSeparator()
-        self._action(m, "Salir", self.close, "Ctrl+Q")
-        m = mb.addMenu("&Pedalera")
-        for key in ("read", "send_all", "send_one", "activate", None, "live", None, "backup"):
-            m.addSeparator() if key is None else m.addAction(a[key])
-        self._action(m, "Gestor de backups…", lambda: dialogs.BackupManager(self).exec())
-        self._action(m, "Restaurar banco desde archivo…", self.restore_to_device)
-        m.addSeparator()
-        self._action(m, "Subir modelo de AMP (.am4data)…", self.upload_amp_model)
-        self._action(m, "Restaurar AMP/CAB de fábrica…", lambda: dialogs.FactoryAmpCabDialog(self).exec())
-        m.addSeparator()
-        self._action(m, "Puerto MIDI…", self.choose_midi_port)
-        self._action(m, "Asistente de calibración…", lambda: dialogs.CalibrationWizard(self).exec())
-        m = mb.addMenu("&Editar")
-        for key in ("undo", None, "copy", "paste", "duplicate", "swap", "left", "right", None,
-                    "rename", "rename_bank", "color", None, "library", "ai", None):
-            m.addSeparator() if key is None else m.addAction(a[key])
-        sub = m.addMenu("Restaurar de fábrica")
-        for key in ("factory", "factory_bank", "factory_all"):
-            sub.addAction(a[key])
-        m.addAction(a["revert"])
-        m.addAction(a["revert_all"])
-        m = mb.addMenu("&Nube")
-        self._action(m, "Conectar con Google Drive…", self.cloud_connect)
-        self._action(m, "Subir a la nube ahora", lambda: self.cloud_push(quiet=False))
-        self._action(m, "Traer de la nube…", lambda: self.cloud_check(manual=True))
-        self._action(m, "Historial de la nube…", self.cloud_history)
-        m.addSeparator()
-        self._action(m, "Desconectar de Google Drive", self.cloud_disconnect)
-        m = mb.addMenu("A&yuda")
-        m.addAction(a["menu"])
-        m.addSeparator()
-        self._action(m, "Buscar actualizaciones", self.check_updates)
-        self._action(m, "Bytes del preset", self.show_bytes)
-        self._action(m, "Acerca de", self.about)
+        """No menu bar: «☰ Menú» (dialogs.CommandMenu) has every command. The actions are registered
+        on the window so their keyboard shortcuts keep working without it."""
+        for a in self.act.values():
+            self.addAction(a)
+        for text, fn, key in (("Abrir banco…", self.open_bank, "Ctrl+O"), ("Guardar banco como…", self.save_bank, "Ctrl+S"),
+                              ("Importar preset…", self.import_preset, "Ctrl+I"),
+                              ("Exportar preset…", self.export_preset, "Ctrl+E"), ("Salir", self.close, "Ctrl+Q")):
+            self._action(self, text, fn, key)
 
     # command menu (dialogs.CommandMenu, same commands as the APK menu) -------------------
+
+    def toggle_menu(self) -> None:
+        """The command menu slides in over the editor, below the toolbar (like the APK side panel)."""
+        if self.command_menu is not None:
+            self.command_menu.close_menu()
+        else:
+            self.command_menu = dialogs.CommandMenu(self)
+
+    def command_shortcuts(self) -> dict:
+        """command -> keyboard shortcut shown in the menu."""
+        keys = {"read": "read", "saveAll": "send_all", "saveOne": "send_one", "activate": "activate", "undo": "undo",
+                "copy": "copy", "paste": "paste", "duplicate": "duplicate", "left": "left", "right": "right",
+                "renameBank": "rename_bank", "library": "library", "ai": "ai", "backupNow": "backup"}
+        out = {cmd: self.act[k].shortcut().toString(QKeySequence.NativeText) for cmd, k in keys.items()}
+        out.update({"openBank": "Ctrl+O", "saveBank": "Ctrl+S", "importPreset": "Ctrl+I", "exportPreset": "Ctrl+E"})
+        return {c: k for c, k in out.items() if k}
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        if getattr(self, "command_menu", None) is not None:
+            self.command_menu.place()
 
     def command_state(self) -> dict:
         """command -> False when it can't run now (dimmed), None when it doesn't apply (hidden)."""

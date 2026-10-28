@@ -54,7 +54,7 @@ MENU = [
         ("saveAll", "Guardar todos los cambios", "Escribe en la pedalera los presets modificados", "save", ""),
         ("saveOne", "Guardar este preset", "Solo el preset seleccionado", "save", ""),
         ("activate", "Activar este preset", "Lo hace sonar en la pedalera", "play", "seleccionar sonar"),
-        ("live", "Escucha en vivo", "Cada cambio suena al momento (escribe en la pedalera)", "live", "audicion tiempo real"),
+        ("live", "Escucha en vivo", "Cada cambio suena al momento en la pedalera", "live", "audicion tiempo real"),
         ("port", "Puerto MIDI / Bluetooth…", "Elige la pedalera si no se conecta sola", "plug", "conectar usb bluetooth"),
     ]),
     ("Editar", "rename", [

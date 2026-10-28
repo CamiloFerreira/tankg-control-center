@@ -7,13 +7,14 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QObject, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import (QByteArray, QEasingCurve, QObject, QPoint, QPropertyAnimation, QRectF, QRunnable, QSize,
+                            Qt, QThreadPool, QTimer, QUrl, Signal)
 from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
-    QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
+    QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import ai, artists, chatapps, device, library, menu
@@ -184,27 +185,50 @@ def menu_icon(name: str, color: str = "#8fe0be", size: int = 20) -> QPixmap:
     return pix
 
 
-class CommandMenu(StyledDialog):
+class CommandMenu(QWidget):
     """Every command of the app, searchable, like the APK menu (same groups, texts and icons from
-    tankg/menu.py): quick actions on top, then the groups. Type to filter, Enter runs the first
-    match. Commands that can't run now are dimmed (MainWindow.command_state)."""
+    tankg/menu.py): a panel that slides in from the left over the editor, below the toolbar, with a
+    shade over the rest. Quick actions on top, then the groups; type to filter, Enter runs the first
+    match, Esc or a click outside closes it. Commands that can't run now are dimmed
+    (MainWindow.command_state) and show their keyboard shortcut (MainWindow.command_shortcuts)."""
+
+    WIDTH = 460
 
     def __init__(self, main):
-        super().__init__(main, "Menú", "Busca una acción o elige un grupo. Atajo: Ctrl+Shift+P.", 620, 760)
+        super().__init__(main)
+        self.main = main
+        self.setObjectName("menuShade")
+        self.setAttribute(Qt.WA_StyledBackground)
+        self.panel = QFrame(self)
+        self.panel.setObjectName("menuPanel")
+        outer = QVBoxLayout(self.panel)
+        outer.setContentsMargins(16, 14, 12, 12)
+        outer.setSpacing(10)
+        head = QHBoxLayout()
+        title = QLabel("Menú")
+        title.setObjectName("dlgTitle")
+        close = QPushButton("✕")
+        close.setObjectName("secondary")
+        close.setToolTip("Cerrar (Esc)")
+        close.setCursor(Qt.PointingHandCursor)
+        close.clicked.connect(self.close_menu)
+        head.addWidget(title, 1)
+        head.addWidget(close)
+        outer.addLayout(head)
         self.search = QLineEdit()
         self.search.setObjectName("menuSearch")
         self.search.setPlaceholderText("Buscar: guardar, nube, fábrica, AMP…")
         self.search.addAction(QIcon(menu_icon("search", "#8a96a3")), QLineEdit.LeadingPosition)
         self.search.textChanged.connect(self._filter)
         self.search.returnPressed.connect(self._run_first)
-        self.body.addWidget(self.search)
-        state = main.command_state()
+        outer.addWidget(self.search)
+        state, keys = main.command_state(), main.command_shortcuts()
         labels = {cmd: (label, icon) for _, cmd, label, _, icon, _ in menu.items()}
         self.quick = QWidget()
-        grid = QHBoxLayout(self.quick)
+        grid = QGridLayout(self.quick)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(8)
-        for cmd in menu.QUICK:
+        for n, cmd in enumerate(menu.QUICK):
             b = QToolButton()
             b.setObjectName("quickTile")
             b.setText(menu.QUICK_LABEL[cmd])
@@ -212,41 +236,41 @@ class CommandMenu(StyledDialog):
             b.setIconSize(QSize(24, 24))
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            b.setMinimumHeight(70)
+            b.setMinimumHeight(66)
             b.setCursor(Qt.PointingHandCursor)
             b.setEnabled(bool(state.get(cmd, True)))
             if cmd == "live":
                 b.setCheckable(True)
                 b.setChecked(main.live_action.isChecked())
             b.clicked.connect(lambda _=False, c=cmd: self._run(c))
-            grid.addWidget(b)
-        self.body.addWidget(self.quick)
+            grid.addWidget(b, n // 3, n % 3)
+        outer.addWidget(self.quick)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         inner = QWidget()
-        inner.setObjectName("body")
+        inner.setObjectName("menuInner")
         lay = QVBoxLayout(inner)
-        lay.setContentsMargins(0, 0, 4, 0)
+        lay.setContentsMargins(0, 0, 6, 0)
         lay.setSpacing(6)
         self.groups: list[tuple[QWidget, list]] = []
         self.rows: list[tuple[QPushButton, str, str]] = []
-        for title, icon, _ in menu.MENU:
-            entries = [i for i in menu.items() if i[0] == title]
+        for title_text, icon, _ in menu.MENU:
+            entries = [i for i in menu.items() if i[0] == title_text]
             if not entries:
                 continue
             box = QWidget()
             v = QVBoxLayout(box)
             v.setContentsMargins(0, 8, 0, 0)
             v.setSpacing(6)
-            head = QHBoxLayout()
+            group_head = QHBoxLayout()
             pic = QLabel()
             pic.setPixmap(menu_icon(icon, "#8a96a3", 15))
-            name = QLabel(title.upper())
+            name = QLabel(title_text.upper())
             name.setObjectName("menuGroup")
-            head.addWidget(pic)
-            head.addWidget(name, 1)
-            v.addLayout(head)
+            group_head.addWidget(pic)
+            group_head.addWidget(name, 1)
+            v.addLayout(group_head)
             card = QFrame()
             card.setObjectName("card")
             c = QVBoxLayout(card)
@@ -254,7 +278,8 @@ class CommandMenu(StyledDialog):
             c.setSpacing(0)
             rows = []
             for _, cmd, label, desc, ic, find in entries:
-                row = self._row(cmd, label, desc, ic, bool(state.get(cmd, True)), cmd == "live" and main.live_action.isChecked())
+                row = self._row(cmd, label, desc, ic, bool(state.get(cmd, True)),
+                                cmd == "live" and main.live_action.isChecked(), keys.get(cmd, ""))
                 row.setProperty("find", find)
                 row.setProperty("available", not (cmd in state and state[cmd] is None))   # None: doesn't apply now
                 row.setHidden(not row.property("available"))
@@ -271,11 +296,46 @@ class CommandMenu(StyledDialog):
         lay.addWidget(self.empty)
         lay.addStretch()
         scroll.setWidget(inner)
-        self.body.addWidget(scroll, 1)
-        self.button("Cerrar", self.reject)
+        outer.addWidget(scroll, 1)
+        self.place()
+        self.show()
+        self.raise_()
+        self._slide()
         self.search.setFocus()
 
-    def _row(self, cmd: str, label: str, desc: str, icon: str, enabled: bool, on: bool) -> QPushButton:
+    def place(self) -> None:
+        """Cover the window between the toolbar and the status bar; the panel on the left."""
+        bars = [w for w in self.main.findChildren(QToolBar) if w.isVisible()]
+        top = max((b.geometry().bottom() + 1 for b in bars), default=0)
+        bottom = self.main.statusBar().geometry().top() if self.main.statusBar().isVisible() else self.main.height()
+        self.setGeometry(0, top, self.main.width(), max(0, bottom - top))
+        self.panel.setGeometry(0, 0, min(self.WIDTH, self.width() - 40), self.height())
+
+    def _slide(self) -> None:
+        anim = QPropertyAnimation(self.panel, b"pos", self)
+        anim.setDuration(160)
+        anim.setStartValue(QPoint(-self.panel.width(), 0))
+        anim.setEndValue(QPoint(0, 0))
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.start()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt API
+        if not self.panel.geometry().contains(event.position().toPoint()):   # click on the shade
+            self.close_menu()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API
+        if event.key() == Qt.Key_Escape:
+            self.close_menu()
+        else:
+            super().keyPressEvent(event)
+
+    def close_menu(self) -> None:
+        if self.main.command_menu is self:
+            self.main.command_menu = None
+        self.hide()
+        self.deleteLater()
+
+    def _row(self, cmd: str, label: str, desc: str, icon: str, enabled: bool, on: bool, key: str = "") -> QPushButton:
         b = QPushButton()
         b.setObjectName("menuItem")
         b.setCursor(Qt.PointingHandCursor)
@@ -295,11 +355,16 @@ class CommandMenu(StyledDialog):
         text.addWidget(sub)
         h.addWidget(pic)
         h.addLayout(text, 1)
+        if key:
+            k = QLabel(key)
+            k.setObjectName("menuKey")
+            k.setAttribute(Qt.WA_TransparentForMouseEvents)
+            h.addWidget(k, 0, Qt.AlignVCenter)
         if cmd == "live":
             st = QLabel("ON" if on else "OFF")
             st.setObjectName("menuState")
             st.setProperty("on", on)
-            h.addWidget(st)
+            h.addWidget(st, 0, Qt.AlignVCenter)
         for w in (pic, title, sub):
             w.setAttribute(Qt.WA_TransparentForMouseEvents)
         b.setEnabled(enabled)
@@ -324,12 +389,12 @@ class CommandMenu(StyledDialog):
 
     def _run_first(self) -> None:
         for row, cmd, _ in self.rows:
-            if row.isVisible() and row.isEnabled():
+            if not row.isHidden() and not row.parentWidget().parentWidget().isHidden() and row.isEnabled():
                 self._run(cmd)
                 return
 
     def _run(self, cmd: str) -> None:
-        self.accept()
+        self.close_menu()
         QTimer.singleShot(0, lambda: self.main.run_command(cmd))
 
 
