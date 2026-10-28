@@ -158,6 +158,16 @@ export class TankG {
     this.t.send(Uint8Array.from([0xc0, slot]));
   }
 
+  async uploadAmp() {   // captured over Bluetooth only; the USB form is unknown
+    throw new DeviceError("Subir modelos de AMP solo funciona con la pedalera conectada por Bluetooth: desenchufa el USB "
+      + "y deja que la app se conecte por Bluetooth.");
+  }
+
+  async restoreAmpCab() {
+    throw new DeviceError("Restaurar los AMP/CAB de fábrica solo funciona con la pedalera conectada por Bluetooth: "
+      + "desenchufa el USB y deja que la app se conecte por Bluetooth.");
+  }
+
   /** Write the slots, then read back and verify. progress(n, total, slot|null). */
   async writePresets(target, slots, progress) {
     for (let n = 0; n < slots.length; n++) {
@@ -179,14 +189,25 @@ export class TankG {
 //   f1 = addr << 8 | 4        f2 = len << 8 | space << 4        (same memory map as USB)
 //   cmd 23 read  -> reply cmd 23 with f1 f2 echoed + data;  cmd 22 write -> ACK 00 59 00 01 00 00 00 ff
 //   space 0 = bank (addr 2 + 21*slot), F = commit (len 0), E = select preset (addr = slot, data 01)
+//   f1 low byte = memory: 4 presets, 5 AMP/CAB models (upload: space 0 staging in blocks of 1015,
+//   A audition (data 01), F save into AMP slot = addr (data 00); captured on 2026-10-28)
 export const BLE_SERVICE = "0000ae40-0000-1000-8000-00805f9b34fb";
 export const BLE_TX = "0000ae41-0000-1000-8000-00805f9b34fb";
 export const BLE_RX = "0000ae42-0000-1000-8000-00805f9b34fb";
 const BLE_READ = 0x23, BLE_WRITE = 0x22, BLE_CHUNK = 200;
+export const MEM_PRESETS = 4, MEM_AMPCAB = 5, AMP_CHUNK = 1015, AMP_SLOTS = 9, AMP_UPLOAD_LEN = 7936;
+export const AMPCAB_LEN = 0x34000, SECTOR = 0x1000;   // factory image of the 9 AMP + 8 CAB models
+
+/** Erase one 4 KB sector of the AMP/CAB flash (cmd 21; 0x70 is the constant M-EFCS sends). */
+export function bleEraseFrame(addr, mem = MEM_AMPCAB) {
+  const payload = [...le32((addr << 8) | mem), 0x70];
+  const ck = (0xff - payload.reduce((a, b) => a + b, 0)) & 0xff;
+  return Uint8Array.from([0x00, 0x59, 0x21, payload.length, 0x00, 0x00, ...payload, ck]);
+}
 const le32 = v => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
 
-export function bleFrame(cmd, space, addr, len, data = []) {
-  const payload = [...le32((addr << 8) | 4), ...le32((len << 8) | (space << 4)), ...data];
+export function bleFrame(cmd, space, addr, len, data = [], mem = MEM_PRESETS) {
+  const payload = [...le32((addr << 8) | mem), ...le32((len << 8) | (space << 4)), ...data];
   const ck = (0xff - payload.reduce((a, b) => a + b, 0)) & 0xff;
   return Uint8Array.from([0x00, 0x59, cmd, payload.length & 0xff, payload.length >> 8, 0x00, ...payload, ck]);
 }
@@ -247,8 +268,8 @@ export class TankGBle {
     throw new DeviceError("La pedalera no respondió por Bluetooth.");
   }
 
-  async write(space, addr, data, what) {
-    const ok = await this.transact(bleFrame(BLE_WRITE, space, addr, data.length, data),
+  async write(space, addr, data, what, mem = MEM_PRESETS) {
+    const ok = await this.transact(bleFrame(BLE_WRITE, space, addr, data.length, data, mem),
       f => (f.cmd === 0x00 && f.payload.length === 1 && f.payload[0] === 0x00 ? true : null));
     if (!ok) throw new DeviceError(`La pedalera no confirmó: ${what}`);
   }
@@ -272,6 +293,43 @@ export class TankGBle {
   }
 
   writePresets(target, slots, progress) { return TankG.prototype.writePresets.call(this, target, slots, progress); }
+
+  /** Replace AMP model `slot` (0-8) with `payload` (am4.uploadPayload) like M-EFCS: stage the model,
+   *  audition it, stage it again and save it into the slot. progress(n, total, text). */
+  async uploadAmp(slot, payload, progress = () => {}) {
+    if (!(slot >= 0 && slot < AMP_SLOTS)) throw new Error("AMP slot out of range");
+    if (payload.length !== AMP_UPLOAD_LEN) throw new Error("payload must come from am4.uploadPayload");
+    const starts = [];
+    for (let a = 0; a < payload.length; a += AMP_CHUNK) starts.push(a);
+    const total = 2 * starts.length + 1;
+    for (const [n, space, value] of [[0, 0xa, 1], [1, 0xf, 0]]) {
+      for (const [i, a] of starts.entries()) {
+        progress(n * starts.length + i, total, `Enviando el modelo… ${i + 1}/${starts.length}`);
+        await this.write(0, a, Array.from(payload.slice(a, a + AMP_CHUNK)), "envío del modelo", MEM_AMPCAB);
+      }
+      await this.write(space, value ? 0 : slot, [value], value ? "prueba del modelo" : `guardado en el AMP ${slot + 1}`, MEM_AMPCAB);
+    }
+    progress(total, total, `AMP ${slot + 1} guardado`);
+  }
+
+  /** Rewrite the 9 AMP and 8 CAB models with a factory image like M-EFCS: erase the 52 sectors, then
+   *  write the image (space 7) in blocks. progress(n, total, text). */
+  async restoreAmpCab(image, progress = () => {}) {
+    if (image.length !== AMPCAB_LEN) throw new Error("AMP/CAB image must be 212992 bytes");
+    const sectors = AMPCAB_LEN / SECTOR, blocks = Math.ceil(AMPCAB_LEN / AMP_CHUNK), total = sectors + blocks;
+    const ack = f => (f.cmd === 0x00 && f.payload.length === 1 && f.payload[0] === 0x00 ? true : null);
+    for (let i = 0; i < sectors; i++) {
+      progress(i, total, `Borrando la memoria de modelos… ${i + 1}/${sectors}`);
+      if (!(await this.transact(bleEraseFrame(i * SECTOR), ack)))
+        throw new DeviceError(`La pedalera no confirmó el borrado del sector ${i + 1}. Repite la restauración.`);
+    }
+    for (let i = 0; i < blocks; i++) {
+      progress(sectors + i, total, `Escribiendo los modelos de fábrica… ${i + 1}/${blocks}`);
+      const a = i * AMP_CHUNK;
+      await this.write(7, a, Array.from(image.slice(a, a + AMP_CHUNK)), "escritura de los modelos (repite la restauración)", MEM_AMPCAB);
+    }
+    progress(total, total, "Modelos de AMP/CAB de fábrica restaurados");
+  }
 }
 
 // transports -------------------------------------------------------------------------------

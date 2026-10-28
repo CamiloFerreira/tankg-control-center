@@ -165,3 +165,30 @@ cmd 11 identificación -> «TANK-Gv2_097»
 Verificado con la app: banco completo leído en bloques de 200 bytes (~210 ms), escritura de presets
 + commit con relectura, selección. Notas de Android: tras `close()` el enlace físico sigue ~1 s;
 reconectar antes falla (sin notificaciones), por eso `Ble.java` espera 2 s.
+
+## 9. Modelos de AMP/CAB por Bluetooth [VERIFICADO 2026-10-28]
+
+Capturado con el registro HCI de Android mientras M-EFCS subía un `.am4data` y restauraba de fábrica.
+El byte bajo de `f1` elige la memoria: **4 = presets** (lo de §5), **5 = modelos AMP/CAB**.
+
+Mapa de la memoria 5 (= `tankG_am{3,4}_ampCab.bin` de M-EFCS, 212992 bytes): 9 AMP × 16 KB, luego 8 CAB × 8 KB
+(cabecera `CAB\0` + número + nombre, muestras de 24 bits; formato de la conversión WAV→CAB: DESCONOCIDO).
+
+**Subir un AMP** (`.am4data`, 7868 bytes: `AM4\0`, nombre y pesos float32 de una GRU de 16 unidades en 0x83C,
+orden PyTorch): M-EFCS le añade un bloque `LMT\0` + 16 float32 (7936 bytes en total) y lo envía en bloques de
+1015 bytes a space 0 (zona de espera), `space A` dato 01 (prueba en vivo), lo reenvía, y `space F` addr = espacio
+0–8, dato 00 (guardar). El `LMT` lo calcula `calc_bias_gru_am4` de `libamx_parser_lib.so`: estado de la GRU tras
+44100 muestras de `exp(ln(0.001)·i/22050)`, en punto fijo Q21 con tablas de 512 entradas
+`trunc(sigmoid|tanh(-16 + i/16)·2²³)`. Reimplementado en `tankg/am4.py` y `am4.js`: idéntico byte a byte al
+nativo (ejecutado con unicorn) en los 9 AMP de fábrica, el archivo subido por M-EFCS y uno sintético
+(`tests/am4_synthetic.am4data`). Nuestra app subió un modelo con bytes idénticos a los de M-EFCS y la
+pedalera lo aceptó (ACK en cada paso). No hay lectura verificada de la memoria 5: no se puede releer.
+
+**Restaurar AMP/CAB de fábrica**: cmd 21 (borrado) por cada sector de 4 KB,
+`00 59 21 05 00 00 | f1 | 70 | ck` (52 sectores, ~80 ms cada uno), y luego la imagen completa con
+`cmd 22 space 7` en bloques de 1015 bytes (~140 ms cada uno; ~38 s en total). Las dos imágenes enviadas son
+idénticas a `tankG_am4_ampCab.bin` y `tankG_am3_ampCab.bin`. "Restaurar todo" de M-EFCS escribe además
+756 bytes del banco (desde la dirección 0, sin los 2 últimos bytes: el LED de 9D queda como estaba), commit
+y el preset en edición (space 1).
+
+Por USB: forma de estos comandos DESCONOCIDA (no se implementa).

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { applyDesign, fromText, webPrompt, zoneGap } from "../../android/ui/js/ai.js";
 import { FIELDS } from "../../android/ui/js/data.js";
+import { SIG, TANH } from "../../android/ui/js/am4.js";
 import { parsePresetFile, parseSetFile, presetFile, setFile } from "../../android/ui/js/files.js";
 import { Bank, fromHex, toHex } from "../../android/ui/js/protocol.js";
 
@@ -18,6 +19,8 @@ const set = parseSetFile(g.setPy);
 assert.equal(set.title, g.setTitle); assert.deepEqual(set.items.map(i => toHex(i.record)), g.setRaws);
 for (const f of FIELDS)
   assert.deepEqual([...Array(f.max + 1).keys()].filter(v => zoneGap(f, v)), g.gaps[f.key], f.key);
+assert.deepEqual(SIG, g.am4Tables.sig, "sigmoid table");
+assert.deepEqual(TANH, g.am4Tables.tanh, "tanh table");
 const bank = Bank.fromBytes(fromHex(g.bank));
 console.log(JSON.stringify({ preset: presetFile(fromHex(g.presetRaw), 5, g.presetName),
   set: setFile(bank, [4, 5, 6, 7], ["Uno", "", "Tres", "Cuatro"], "Mi banco") }));

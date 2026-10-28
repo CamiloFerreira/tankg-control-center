@@ -64,14 +64,16 @@ Windows/Linux (`tankg/`, PySide6) and Android (`android/`) are the same product.
 | Factory restore (preset/bank/all), revert | Editar menu | menu |
 | Files: open/save bank, import/export preset and set, compare | Archivo menu | menu (file picker / Downloads) |
 | Bytes of the preset, about, updates | Ayuda menu | menu |
+| AMP model upload, factory AMP/CAB restore (AM4/AM3, Bluetooth) | Pedalera menu, `AmpUploadDialog`, `FactoryAmpCabDialog` | menu |
 | Google Drive sync (auto push after a verified save, offer newer version at start, history) | Nube menu (`tankg/cloud.py`, `dialogs.CloudSignIn` code) | menu → Nube (`cloud.js`, device-flow code) |
 
 ## Protocol facts and rules
 
 - Verified on hardware: bank read (space 0, len 758), single-record write + commit (persists across power cycle), Program Change select. Spaces 1/2 of the MK-300 protocol do not exist on the Tank-G (they echo a stale buffer).
-- Not implemented on purpose (protocol unverified, could overwrite factory data): IR/CAB import, Loopback and other global settings, firmware update.
+- AMP model upload (`.am4data`, `tankg/am4.py` computes the LMT block bit-exact) and factory AMP/CAB restore (sets AM4/AM3, images in `research/factory/` and `android/ui/factory/`) are captured from M-EFCS over Bluetooth only (`research/FINDINGS.md` §9); USB raises an error.
+- Not implemented on purpose (protocol unverified, could overwrite factory data): IR/CAB import (WAV→CAB conversion unknown), Loopback and other global settings, firmware update.
 - `research/FINDINGS.md` is the source of truth for what is verified vs inferred; mark anything new accordingly and never invent commands or byte meanings. The calibration assistant (`dialogs.CalibrationWizard`) exists to confirm the inferred field map.
 - Before writing to the pedal, take a backup (`library.backup`); write only changed slots and verify by read-back.
 - Three-zone knobs (MOD FX, DLY MIX, RVB DECAY) select one of three effect types by position; zone limits are assumed equal thirds (unverified).
 - `tests/live_bank.bin` is a real bank image used as a fixture; golden frames in tests are captures from the real pedal — do not "fix" them to match the code.
-- `research/factory/` and `research/TANK-G_en.pdf` are M-VAVE files extracted from M-EFCS; fine in the private repo, remove before making it public.
+- `research/factory/`, `android/ui/factory/` and `research/TANK-G_en.pdf` are M-VAVE files extracted from M-EFCS; fine in the private repo, remove before making it public.

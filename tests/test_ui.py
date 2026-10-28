@@ -28,7 +28,7 @@ def test_ui_protocol():
 def test_ui_ai_and_files_match_python(tmp_path):
     """Same apply_design, browser prompt and interchangeable .tgpreset/.tgset files in JS and Python."""
     import json
-    from tankg import ai, artists, library
+    from tankg import ai, am4, artists, library
     from tankg.model import FIELDS, Bank, Preset, zone_gap
     live = (ROOT / "tests/live_bank.bin").read_bytes()
     bank = Bank.from_bytes(live)
@@ -53,7 +53,8 @@ def test_ui_ai_and_files_match_python(tmp_path):
     golden = {"designs": designs, "prompts": prompts, "presetPy": preset_py.read_text(), "presetRaw": bank.presets[3].to_bytes().hex(),
               "presetName": "Mi Preset ñ", "setPy": set_py.read_text(), "setTitle": "Banco 3",
               "setRaws": [bank.presets[s].to_bytes().hex() for s in range(8, 12)], "bank": live.hex(),
-              "gaps": {f.key: [v for v in range(f.maximum + 1) if zone_gap(f, v)] for f in FIELDS}}
+              "gaps": {f.key: [v for v in range(f.maximum + 1) if zone_gap(f, v)] for f in FIELDS},
+              "am4Tables": {"sig": am4._SIG, "tanh": am4._TANH}}
     gfile = tmp_path / "golden.json"
     gfile.write_text(json.dumps(golden, ensure_ascii=False), encoding="utf-8")
     r = subprocess.run(["node", str(ROOT / "tests/ui/parity.test.mjs"), str(gfile)], capture_output=True, text=True,

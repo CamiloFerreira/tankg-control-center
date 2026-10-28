@@ -18,7 +18,8 @@ args = [
     "--noconfirm",
     "--clean",
     "--paths", str(ROOT),
-    "--add-data", f"{ROOT / 'research/factory/tankG_am4_preset.bin'}{SEP}research/factory",
+    *[x for name in ("tankG_am4_preset.bin", "tankG_am3_preset.bin", "tankG_am4_ampCab.bin", "tankG_am3_ampCab.bin")
+      for x in ("--add-data", f"{ROOT / 'research/factory' / name}{SEP}research/factory")],
     "--add-data", f"{ROOT / 'packaging/icon.png'}{SEP}packaging",
     "--distpath", str(ROOT / "dist"),
     "--workpath", str(ROOT / "build"),

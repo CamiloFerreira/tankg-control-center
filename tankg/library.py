@@ -25,9 +25,12 @@ else:
 BACKUP_DIR = DATA_DIR / "backups"
 ALIAS_FILE = DATA_DIR / "aliases.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+FACTORY_DIR = PROJECT_ROOT / "research/factory"
+# The two factory sets of M-EFCS ("AM4" newer models, "AM3"): 36 presets + the AMP/CAB models image.
+FACTORY_SETS = {"am4": "AM4", "am3": "AM3"}
 FACTORY_CANDIDATES = [
     DATA_DIR / "factory.tgbank",
-    PROJECT_ROOT / "research/factory/tankG_am4_preset.bin",
+    FACTORY_DIR / "tankG_am4_preset.bin",
 ]
 
 
@@ -105,8 +108,10 @@ def list_backups() -> list[Path]:
     return sorted(BACKUP_DIR.glob("*.tgbank"), reverse=True) if BACKUP_DIR.exists() else []
 
 
-def factory_bank() -> Bank | None:
-    for p in FACTORY_CANDIDATES:
+def factory_bank(kind: str | None = None) -> Bank | None:
+    """Factory presets of `kind` ("am4"/"am3"; default: the set last restored, see Settings)."""
+    kind = kind or Settings().factory_set
+    for p in FACTORY_CANDIDATES if kind == "am4" else [FACTORY_DIR / f"tankG_{kind}_preset.bin"]:
         if p.exists():
             try:
                 return load_bank(p)
@@ -115,24 +120,36 @@ def factory_bank() -> Bank | None:
     return None
 
 
+def factory_ampcab(kind: str) -> bytes | None:
+    """Factory image of the 9 AMP and 8 CAB models (212992 bytes) of set `kind`."""
+    try:
+        data = (FACTORY_DIR / f"tankG_{kind}_ampCab.bin").read_bytes()
+    except OSError:
+        return None
+    return data if len(data) == 0x34000 else None
+
+
 class Aliases:
-    """Interface-only names for presets ("6A") and banks ("6"); the pedal has no names."""
+    """Interface-only names for presets ("6A"), banks ("6") and uploaded AMP models ("3");
+    the pedal has no names."""
 
     def __init__(self, path: Path = ALIAS_FILE):
         self.path = path
         self.presets: dict[str, str] = {}
         self.banks: dict[str, str] = {}
+        self.amps: dict[str, str] = {}
         try:
             doc = _read_json(path)
             self.presets = {k: v for k, v in doc.get("presets", {}).items() if v}
             self.banks = {k: v for k, v in doc.get("banks", {}).items() if v}
+            self.amps = {k: v for k, v in doc.get("amps", {}).items() if v}
         except (OSError, ValueError):
             pass
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
-        _write_json(tmp, {"presets": self.presets, "banks": self.banks})
+        _write_json(tmp, {"presets": self.presets, "banks": self.banks, "amps": self.amps})
         tmp.replace(self.path)
 
     def preset(self, slot: int) -> str:
@@ -156,6 +173,18 @@ class Aliases:
             self.banks[str(bank + 1)] = name
         else:
             self.banks.pop(str(bank + 1), None)
+        self.save()
+
+    def amp(self, slot: int) -> str:
+        """Name of the model uploaded to AMP slot `slot` (0-8); empty = factory model."""
+        return self.amps.get(str(slot + 1), "")
+
+    def set_amp(self, slot: int, name: str) -> None:
+        name = name.strip()
+        if name:
+            self.amps[str(slot + 1)] = name
+        else:
+            self.amps.pop(str(slot + 1), None)
         self.save()
 
     def swap(self, a: int, b: int) -> None:
@@ -231,6 +260,16 @@ class Settings:
 
     def set_ai(self, ai: dict) -> None:
         self.data["ai"] = ai
+        self.save()
+
+    @property
+    def factory_set(self) -> str:
+        """Factory set ("am4"/"am3") last restored on the pedal; the editor's factory presets follow it."""
+        kind = self.data.get("factory_set")
+        return kind if kind in FACTORY_SETS else "am4"
+
+    def set_factory_set(self, kind: str) -> None:
+        self.data["factory_set"] = kind
         self.save()
 
     @property

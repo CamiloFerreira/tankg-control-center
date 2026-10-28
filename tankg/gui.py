@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import cloud, dialogs, library, theme, updater
+from . import am4, cloud, dialogs, library, theme, updater
 from .version import PRIVACY_URL, TERMS_URL, __version__
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_gap, zone_of
@@ -109,14 +109,15 @@ class Job(QRunnable):
     """Runs fn(dev, report) with a freshly opened TankG in a worker thread.
     report(text, n=-1, total=-1) shows progress."""
 
-    def __init__(self, fn):
+    def __init__(self, fn, opener=None):
         super().__init__()
         self.fn = fn
+        self.opener = opener or TankG.open
         self.signals = _Signals()
 
     def run(self) -> None:
         try:
-            dev = TankG.open()
+            dev = self.opener()
             try:
                 result = self.fn(dev, lambda text, n=-1, total=-1: self.signals.progress.emit(text, n, total))
             finally:
@@ -529,7 +530,7 @@ class MainWindow(QMainWindow):
 
         section("GATE", "gate", None, [Knob("gate", "gate")])
         section("AMP", "amp", "amp_on", [
-            Selector("amp_type", [f"{i + 1}. {n}" for i, n in enumerate(AMP_MODELS)], "amp"),
+            Selector("amp_type", [self.amp_label(i) for i in range(len(AMP_MODELS))], "amp"),
             Knob("gain", "amp"), Knob("treble", "amp"), Knob("middle", "amp"),
             Knob("bass", "amp"), Knob("volume", "amp")])
         section("MOD", "mod", "mod_on", [Knob("mod_fx", "mod"), Knob("mod_speed", "mod")])
@@ -669,6 +670,9 @@ class MainWindow(QMainWindow):
             m.addSeparator() if key is None else m.addAction(a[key])
         self._action(m, "Gestor de backups…", lambda: dialogs.BackupManager(self).exec())
         self._action(m, "Restaurar banco desde archivo…", self.restore_to_device)
+        m.addSeparator()
+        self._action(m, "Subir modelo de AMP (.am4data)…", self.upload_amp_model)
+        self._action(m, "Restaurar AMP/CAB de fábrica…", lambda: dialogs.FactoryAmpCabDialog(self).exec())
         m.addSeparator()
         self._action(m, "Puerto MIDI…", self.choose_midi_port)
         self._action(m, "Asistente de calibración…", lambda: dialogs.CalibrationWizard(self).exec())
@@ -850,14 +854,14 @@ class MainWindow(QMainWindow):
 
     # background jobs -------------------------------------------------------------------
 
-    def _run(self, fn, on_done, label: str, quiet_errors: bool = False, dialog=None) -> bool:
+    def _run(self, fn, on_done, label: str, quiet_errors: bool = False, dialog=None, opener=None) -> bool:
         """Run fn(dev, report) in the background. With an UploadDialog, progress and errors
         are shown there instead of the status bar / a message box."""
         if self.busy:
             return False
         self.busy = True
         self.statusBar().showMessage(label)
-        job = Job(fn)
+        job = Job(fn, opener)
         job.setAutoDelete(False)
         self._jobs.add(job)   # keep the runnable and its signals alive until it reports back
         job.signals.done.connect(lambda r: (self._jobs.discard(job), self._job_done(on_done, r)))
@@ -989,6 +993,77 @@ class MainWindow(QMainWindow):
         self._send(slots, select=select, confirm=False)
         return True
 
+    # AMP models ---------------------------------------------------------------------
+
+    def amp_label(self, slot: int) -> str:
+        """TYPE entry: the uploaded model's name when the slot no longer holds the factory one."""
+        custom = self.aliases.amp(slot)
+        return f"{slot + 1}. {custom}" if custom else f"{slot + 1}. {AMP_MODELS[slot]}"
+
+    def refresh_amp_labels(self) -> None:
+        combo = self.controls["amp_type"].combo
+        for i in range(combo.count()):
+            combo.setItemText(i, self.amp_label(i))
+
+    def upload_amp_model(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Subir modelo de AMP", str(Path.home()),
+                                              f"Modelos de AMP (*{am4.EXTENSION})")
+        if not path:
+            return
+        try:
+            data = Path(path).read_bytes()
+            am4.check(data)
+        except (OSError, am4.Am4Error) as e:
+            QMessageBox.warning(self, "Subir modelo de AMP", str(e))
+            return
+        dialogs.AmpUploadDialog(self, data, am4.name_from_path(path)).exec()
+
+    def start_amp_upload(self, slot: int, data: bytes, name: str, dialog) -> bool:
+        def job(dev, report):
+            report("Calculando el bloque LMT del modelo (unos segundos)…", 0, 1)
+            dev.upload_amp(slot, am4.upload_payload(data), report)
+            return slot
+
+        def done(_) -> None:
+            self.aliases.set_amp(slot, name)
+            self.refresh_amp_labels()
+            dialog.finished(f"AMP {slot + 1} reemplazado por «{name}»")
+            self.statusBar().showMessage(f"Modelo de AMP subido al espacio {slot + 1}: {name}", 8000)
+
+        return self._run(job, done, "Subiendo modelo de AMP…", dialog=dialog, opener=TankG.open_bluetooth)
+
+    def start_factory_ampcab(self, kind: str, presets: bool, dialog) -> bool:
+        """Factory AMP/CAB models of set `kind` and, optionally, its 36 presets (verified by read-back)."""
+        image, bank = library.factory_ampcab(kind), library.factory_bank(kind)
+        if image is None or (presets and bank is None):
+            dialog.failed(f"Faltan los archivos de fábrica {library.FACTORY_SETS[kind]} (research/factory).")
+            return False
+
+        def job(dev, report):
+            path = str(library.backup(dev.bank or dev.read_bank(), "auto"))
+            dev.restore_ampcab(image, report)
+            after = None
+            if presets:
+                slots = bank.diff_slots(dev.bank) if dev.bank else list(range(SLOTS))
+                after = dev.write_presets(bank, slots, lambda n, total, s: report(
+                    "Verificando los presets…" if s is None else f"Presets de fábrica {n + 1} de {total}…", -1, -1))
+            return after, path
+
+        def done(result) -> None:
+            after, path = result
+            self.aliases.amps.clear()
+            self.aliases.save()
+            library.Settings().set_factory_set(kind)
+            self.refresh_amp_labels()
+            if after is not None:
+                if self.local is not None:
+                    self._push_undo()
+                self.device, self.local = after, after.copy()
+            dialog.finished(f"Pedalera restaurada a fábrica {library.FACTORY_SETS[kind]} · backup previo: {Path(path).name}")
+            self.statusBar().showMessage(f"AMP/CAB de fábrica {library.FACTORY_SETS[kind]} restaurados", 8000)
+
+        return self._run(job, done, "Restaurando AMP/CAB de fábrica…", dialog=dialog, opener=TankG.open_bluetooth)
+
     def send_all(self) -> None:
         if self._need_local() and self.device is not None:
             self._send(self.modified_slots())
@@ -1116,7 +1191,7 @@ class MainWindow(QMainWindow):
         factory = library.factory_bank()
         if factory is None:
             QMessageBox.warning(self, "Fábrica", "No se encontró el banco de fábrica "
-                                "(research/factory/tankG_am4_preset.bin).")
+                                "(research/factory).")
         return factory
 
     def _restore_factory(self, slots: list[int]) -> None:

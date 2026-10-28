@@ -287,6 +287,141 @@ class UploadDialog(StyledDialog):
         self.adjustSize()
 
 
+class AmpUploadDialog(StyledDialog):
+    """Replace one of the 9 AMP models of the pedal with an .am4data file (Bluetooth only)."""
+
+    def __init__(self, main, data: bytes, name: str):
+        super().__init__(main, "Subir modelo de AMP",
+                         "Reemplaza uno de los 9 modelos de AMP (perilla TYPE) por un archivo .am4data de M-EFCS. "
+                         "Se envía por Bluetooth, igual que la app oficial.", 560, 360)
+        self.data = data
+        self.running = False
+        _, lay = self.card("1", "Modelo")
+        self.name = QLineEdit(name)
+        self.name.setPlaceholderText("Nombre que mostrará la app")
+        lay.addWidget(self.name)
+        _, lay = self.card("2", "Espacio de AMP que se reemplaza")
+        self.slot = QComboBox()
+        self.slot.addItems([main.amp_label(i) for i in range(len(AMP_MODELS))])
+        current = main.local.presets[main.current].amp if main.local else 0
+        self.slot.setCurrentIndex(current)
+        lay.addWidget(self.slot)
+        note = QLabel("Todos los presets que usan ese TYPE sonarán con el modelo nuevo. Para volver al original: "
+                      "Pedalera → Restaurar AMP/CAB de fábrica.")
+        note.setObjectName("hint")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        _, lay = self.card("", "Progreso")
+        self.bar = QProgressBar()
+        self.bar.setTextVisible(False)
+        self.bar.setRange(0, 1)
+        lay.addWidget(self.bar)
+        self.step = QLabel()
+        self.step.setWordWrap(True)
+        lay.addWidget(self.step)
+        self.status(self.step, "Requiere la pedalera encendida con Bluetooth y libre (sin la app del teléfono).")
+        self.close_btn = self.button("Cancelar", self.reject)
+        self.go = self.button("Subir a la pedalera", self._start, "primary")
+
+    def _start(self) -> None:
+        slot = self.slot.currentIndex()
+        if not ask(self, "Subir modelo de AMP",
+                   f"Se reemplazará el AMP {slot + 1} de la pedalera por «{self.name.text().strip() or 'el modelo'}».\n"
+                   "¿Continuar?"):
+            return
+        if self.main.start_amp_upload(slot, self.data, self.name.text().strip() or f"AMP {slot + 1}", self):
+            self.running = True
+            for w in (self.go, self.close_btn, self.slot, self.name):
+                w.setEnabled(False)
+            self.status(self.step, "Conectando por Bluetooth…")
+
+    def progress(self, text: str, n: int, total: int) -> None:
+        if n >= 0:
+            self.bar.setRange(0, total)
+            self.bar.setValue(n)
+        self.status(self.step, text)
+
+    def reject(self) -> None:
+        if not self.running:
+            super().reject()
+
+    def finished(self, text: str) -> None:
+        self.running = False
+        self.bar.setRange(0, 1)
+        self.bar.setValue(1)
+        self.status(self.step, text, True)
+        self.go.hide()
+        self.close_btn.setText("Cerrar")
+        self.close_btn.setEnabled(True)
+
+    def failed(self, text: str) -> None:
+        self.running = False
+        self.status(self.step, text, False)
+        for w in (self.go, self.close_btn, self.slot, self.name):
+            w.setEnabled(True)
+
+
+class FactoryAmpCabDialog(StyledDialog):
+    """Put back the factory AMP and CAB models (and optionally the 36 presets) of set AM4 or AM3,
+    like "restore" in M-EFCS (Bluetooth only)."""
+
+    def __init__(self, main):
+        super().__init__(main, "Restaurar AMP/CAB de fábrica",
+                         "Vuelve a escribir los 9 modelos de AMP y los 8 CAB que trae la pedalera, igual que M-EFCS. "
+                         "Borra los modelos subidos. Se envía por Bluetooth y tarda unos 40 segundos.", 560, 420)
+        self.running = False
+        _, lay = self.card("1", "Juego de fábrica")
+        row, self.kinds = self.segmented([f"{v} " + ("(modelos nuevos)" if k == "am4" else "(original)")
+                                          for k, v in library.FACTORY_SETS.items()], self)
+        self.keys = list(library.FACTORY_SETS)
+        self.kinds[self.keys.index(library.Settings().factory_set)].setChecked(True)
+        lay.addLayout(row)
+        self.presets = QCheckBox("También los 36 presets de fábrica de ese juego")
+        self.presets.setChecked(True)
+        lay.addWidget(self.presets)
+        note = QLabel("Antes se hace un backup del banco de presets. Los cambios sin guardar del editor se pierden "
+                      "si restauras también los presets.")
+        note.setObjectName("hint")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        _, lay = self.card("", "Progreso")
+        self.bar = QProgressBar()
+        self.bar.setTextVisible(False)
+        self.bar.setRange(0, 1)
+        lay.addWidget(self.bar)
+        self.step = QLabel()
+        self.step.setWordWrap(True)
+        lay.addWidget(self.step)
+        self.status(self.step, "Requiere la pedalera encendida con Bluetooth y libre (sin la app del teléfono).")
+        self.close_btn = self.button("Cancelar", self.reject)
+        self.go = self.button("Restaurar", self._start, "primary")
+
+    def kind(self) -> str:
+        return next(k for k, b in zip(self.keys, self.kinds) if b.isChecked())
+
+    def _start(self) -> None:
+        kind, presets = self.kind(), self.presets.isChecked()
+        what = "los AMP/CAB" + (" y los 36 presets" if presets else "")
+        if not ask(self, "Restaurar de fábrica", f"Se reemplazarán {what} de la pedalera por los de fábrica "
+                   f"{library.FACTORY_SETS[kind]}.\n¿Continuar?"):
+            return
+        if self.main.start_factory_ampcab(kind, presets, self):
+            self.running = True
+            for w in (self.go, self.close_btn, self.presets, *self.kinds):
+                w.setEnabled(False)
+            self.status(self.step, "Conectando por Bluetooth…")
+
+    progress = AmpUploadDialog.progress
+    reject = AmpUploadDialog.reject
+    finished = AmpUploadDialog.finished
+
+    def failed(self, text: str) -> None:
+        self.running = False
+        self.status(self.step, text, False)
+        for w in (self.go, self.close_btn, self.presets, *self.kinds):
+            w.setEnabled(True)
+
+
 class ArtistLibrary(StyledDialog):
     """Ready-made presets inspired by bands, in banks of four. Load one preset into the selected
     slot or the whole bank into a pedal bank; optionally upload it straight away."""

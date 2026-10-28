@@ -11,7 +11,20 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
-## Novedades (1.7.1)
+## Novedades (1.8.0)
+
+- **Subir modelos de AMP (.am4data)**, los mismos que descarga la app oficial M-EFCS: Pedalera →
+  **Subir modelo de AMP** (en Android, menú). Eliges el archivo y cuál de los 9 AMP (perilla TYPE)
+  reemplaza; la app calcula y envía todo igual que M-EFCS y muestra el nombre del modelo en la lista TYPE.
+- **Restaurar AMP/CAB de fábrica**: vuelve a dejar los 9 AMP y los 8 CAB como vienen, eligiendo el
+  juego **AM4** (modelos nuevos) o **AM3** (original), con o sin los 36 presets de ese juego (antes hace
+  un backup del banco). Tarda unos 40 segundos.
+- Estas dos funciones van **por Bluetooth** (Tank-G v2). Por USB la app avisa: el protocolo de la
+  pedalera para eso solo se conoce por Bluetooth.
+- **Perillas de tres tramos** (MOD FX, DLY MIX, RVB DECAY): si la perilla queda entre dos tramos, la
+  app muestra «APAGADO» y apaga las luces del módulo, como hace la pedalera.
+
+## Versión 1.7.1
 
 - **Icono nuevo** en Linux, Windows y Android: una perilla con su arco de nivel.
 - **Política de privacidad y condiciones del servicio**, enlazadas desde Ayuda → Acerca de

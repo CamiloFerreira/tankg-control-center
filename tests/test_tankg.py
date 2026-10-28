@@ -510,17 +510,33 @@ class FakeBlePedal:
         self.out = bytearray()
         self.sent: list[bytes] = []
         self.deframer = bleproto.Deframer()
+        self.amp_stage = bytearray(7936)
+        self.amps: dict[int, bytes] = {}
+        self.flash = bytearray(0x34000)
+        self.erased = [False] * 52
 
     def write(self, data: bytes) -> None:
         self.sent.append(bytes(data))
         for f in self.deframer.push(data):
+            if f.cmd == 0x21:   # erase a 4 KB sector of the AMP/CAB flash
+                self.erased[int.from_bytes(f.payload[0:4], "little") >> 20] = True
+                self.out += bytes.fromhex("00 59 00 01 00 00 00 ff")
+                continue
             f1, f2 = int.from_bytes(f.payload[0:4], "little"), int.from_bytes(f.payload[4:8], "little")
             addr, length, space = f1 >> 8, f2 >> 8, (f2 >> 4) & 0xF
             if f.cmd == 0x23:
                 payload = f.payload[:8] + bytes(self.mem[addr:addr + length])
                 self.out += b"\x00\x59\x23" + len(payload).to_bytes(2, "little") + b"\x00" + payload + bytes([(0xFF - sum(payload)) & 0xFF])
             else:
-                if space == 0 and length:
+                if f1 & 0xFF == 5:   # AMP/CAB memory: staging buffer, audition, save into a slot
+                    if space == 0:
+                        self.amp_stage[addr:addr + length] = f.payload[8:]
+                    elif space == 0xF:
+                        self.amps[addr] = bytes(self.amp_stage)
+                    elif space == 0x7:
+                        assert all(self.erased[addr // 0x1000:(addr + length - 1) // 0x1000 + 1]), "write before erase"
+                        self.flash[addr:addr + length] = f.payload[8:]
+                elif space == 0 and length:
                     self.mem[addr:addr + length] = f.payload[8:]
                 self.out += bytes.fromhex("00 59 00 01 00 00 00 ff")
 
@@ -545,6 +561,93 @@ def test_tankg_ble_read_write_select():
     assert any(s.hex(" ") == "00 59 22 08 00 00 04 00 00 00 f0 00 00 00 0b" for s in pedal.sent)
     dev.select_preset(35)
     assert pedal.sent[-1].hex(" ") == "00 59 22 09 00 00 04 23 00 00 e0 01 00 00 01 f6"
+
+
+AM4_FIXTURE = (Path(__file__).parent / "am4_synthetic.am4data").read_bytes()
+
+
+def test_am4_lmt_matches_native_and_capture_frames():
+    """LMT of a synthetic model (random weights) as computed by the official native library."""
+    from tankg import am4, bleproto as b
+    model = AM4_FIXTURE[:am4.FILE_LEN]
+    assert am4.lmt(model) == AM4_FIXTURE[am4.FILE_LEN:]
+    assert am4.upload_payload(model) == AM4_FIXTURE == am4.upload_payload(AM4_FIXTURE)
+    for bad in (b"XXXX" + model[4:], model[:-1], model + b"JUNK" * 17):
+        with pytest.raises(am4.Am4Error):
+            am4.check(bad)
+    assert am4.name_from_path("/x/2d43beb2-89c9-497c-a474-f55b863bd259_RANDALL_RG100ES_100W__1987__CH_Clean.am4data") == \
+        "RANDALL RG100ES 100W 1987 CH Clean"
+    # frames captured from M-EFCS uploading a model to AMP 1 and AMP 3 (2026-10-28)
+    stage = b.frame(b.WRITE, b.SPACE_AMP_STAGE, 0, b.AMP_CHUNK, model[:b.AMP_CHUNK], b.MEM_AMPCAB)
+    assert stage[:14].hex(" ") == "00 59 22 ff 03 00 05 00 00 00 00 f7 03 00"
+    assert b.frame(b.WRITE, 0xA, 0, 1, b"\x01", b.MEM_AMPCAB).hex(" ") == "00 59 22 09 00 00 05 00 00 00 a0 01 00 00 01 58"
+    assert b.frame(b.WRITE, 0xF, 0, 1, b"\x00", b.MEM_AMPCAB).hex(" ") == "00 59 22 09 00 00 05 00 00 00 f0 01 00 00 00 09"
+    assert b.frame(b.WRITE, 0xF, 2, 1, b"\x00", b.MEM_AMPCAB).hex(" ") == "00 59 22 09 00 00 05 02 00 00 f0 01 00 00 00 07"
+
+
+def test_tankg_ble_upload_amp():
+    from tankg import am4
+    from tankg.device import DeviceError, TankG, TankGBle
+    pedal = FakeBlePedal(LIVE)
+    dev = TankGBle(pedal)
+    steps = []
+    dev.upload_amp(2, AM4_FIXTURE, lambda text, n, total: steps.append((n, total)))
+    assert pedal.amps == {2: AM4_FIXTURE}
+    assert pedal.mem == bytearray(LIVE)                       # the preset bank is untouched
+    heads = [f[:7].hex(" ") + " " + f[10:12].hex(" ") for f in pedal.sent if f[:3] == b"\x00\x59\x22"]
+    assert heads == ["00 59 22 ff 03 00 05 00 f7"] * 7 + ["00 59 22 47 03 00 05 00 3f"] + \
+        ["00 59 22 09 00 00 05 a0 01"] + ["00 59 22 ff 03 00 05 00 f7"] * 7 + ["00 59 22 47 03 00 05 00 3f"] + \
+        ["00 59 22 09 00 00 05 f0 01"]
+    assert steps[-1] == (17, 17)
+    with pytest.raises(DeviceError, match="Bluetooth"):
+        TankG(FakePedal(LIVE)).upload_amp(0, AM4_FIXTURE)
+    with pytest.raises(ValueError):
+        dev.upload_amp(9, AM4_FIXTURE)
+    with pytest.raises(ValueError):
+        dev.upload_amp(0, AM4_FIXTURE[:am4.FILE_LEN])
+
+
+@pytest.mark.skipif(not (ROOT / "research/factory/tankG_am3_ampCab.bin").exists(), reason="factory files not present")
+def test_factory_ampcab_restore():
+    from tankg import bleproto as b
+    from tankg.device import DeviceError, TankG, TankGBle
+    # erase frames captured from M-EFCS (first and last of the 52 sectors)
+    assert b.erase_frame(0).hex(" ") == "00 59 21 05 00 00 05 00 00 00 70 8a"
+    assert b.erase_frame(0x33000).hex(" ") == "00 59 21 05 00 00 05 00 30 03 70 57"
+    for kind in library.FACTORY_SETS:
+        image = library.factory_ampcab(kind)
+        assert len(image) == 0x34000
+        assert library.factory_bank(kind) is not None
+        assert (ROOT / f"android/ui/factory/tankG_{kind}_ampCab.bin").read_bytes() == image   # same file in the APK
+    image = library.factory_ampcab("am4")
+    pedal = FakeBlePedal(LIVE)
+    steps = []
+    TankGBle(pedal).restore_ampcab(image, lambda text, n, total: steps.append(n))
+    assert bytes(pedal.flash) == image and all(pedal.erased) and pedal.mem == bytearray(LIVE)
+    flash_writes = [f for f in pedal.sent if f[:3] == b"\x00\x59\x22"]
+    assert len(flash_writes) == 210 and flash_writes[0][6:14].hex(" ") == "05 00 00 00 70 f7 03 00"
+    assert steps[-1] == 52 + 210
+    with pytest.raises(DeviceError, match="Bluetooth"):
+        TankG(FakePedal(LIVE)).restore_ampcab(image)
+
+
+def test_factory_set_setting(tmp_path, monkeypatch):
+    monkeypatch.setattr(library, "SETTINGS_FILE", tmp_path / "s.json")
+    assert library.Settings().factory_set == "am4"
+    library.Settings().set_factory_set("am3")
+    assert library.Settings().factory_set == "am3"
+    if (ROOT / "research/factory/tankG_am3_preset.bin").exists():
+        assert library.factory_bank().to_bytes() == library.factory_bank("am3").to_bytes() != library.factory_bank("am4").to_bytes()
+
+
+def test_aliases_keep_amp_names(tmp_path):
+    a = library.Aliases(tmp_path / "a.json")
+    a.set_preset(0, "Uno")
+    a.set_amp(2, "RANDALL Clean")
+    b = library.Aliases(tmp_path / "a.json")
+    assert b.amp(2) == "RANDALL Clean" and b.amp(0) == "" and b.preset(0) == "Uno"
+    b.set_amp(2, "")
+    assert library.Aliases(tmp_path / "a.json").amps == {}
 
 
 def test_bluetooth_midi_ports_are_not_used_for_sysex():

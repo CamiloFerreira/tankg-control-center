@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as P from "../../android/ui/js/protocol.js";
+import * as am4 from "../../android/ui/js/am4.js";
 import { LIBRARY, FIELDS } from "../../android/ui/js/data.js";
 
 const hex = b => Array.from(b, v => v.toString(16).padStart(2, "0")).join(" ");
@@ -68,18 +69,26 @@ assert.equal(got.length, 1); assert.equal(got[0].cmd, 0x23); assert.deepEqual(go
 // TankGBle against a fake pedal that speaks the captured framing
 function fakeBlePedal(image) {
   const mem = Uint8Array.from(image); let cb = null; const sent = [];
+  const ampStage = new Uint8Array(7936), amps = {}, flash = new Uint8Array(0x34000), erased = new Set();
   const deframer = new P.BleDeframer();
-  return { mem, sent, onMessage: f => { cb = f; }, close() {},
+  return { mem, sent, amps, flash, erased, onMessage: f => { cb = f; }, close() {},
     send(frame) {
       sent.push(Uint8Array.from(frame));
       for (const f of deframer.push(Array.from(frame))) {
-        const f1 = f.payload[0] | f.payload[1] << 8 | f.payload[2] << 16, f2 = f.payload[4] | f.payload[5] << 8 | f.payload[6] << 16;
+        const f1 = (f.payload[0] | f.payload[1] << 8 | f.payload[2] << 16 | f.payload[3] << 24) >>> 0, f2 = f.payload[4] | f.payload[5] << 8 | f.payload[6] << 16;
         const addr = f1 >> 8, len = f2 >> 8, space = (f2 >> 4) & 0xf, data = f.payload.slice(8);
         let out;
         if (f.cmd === 0x23) {
           const payload = [...f.payload.slice(0, 8), ...mem.slice(addr, addr + len)];
           const ck = (0xff - payload.reduce((a, b) => a + b, 0)) & 0xff;
           out = [0x00, 0x59, 0x23, payload.length & 0xff, payload.length >> 8, 0, ...payload, ck];
+        } else if (f.cmd === 0x21) {   // erase a 4 KB sector of the AMP/CAB flash
+          erased.add(f1 >>> 20);
+          out = [0x00, 0x59, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff];
+        } else if ((f1 & 0xff) === 5) {   // AMP/CAB memory: staging buffer, audition, save into a slot
+          if (space === 0) ampStage.set(data, addr); else if (space === 0xf) amps[addr] = Uint8Array.from(ampStage);
+          else if (space === 7) { assert.ok(erased.has(addr >> 12), "write before erase"); flash.set(data, addr); }
+          out = [0x00, 0x59, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff];
         } else {
           if (space === 0 && len) mem.set(data, addr);
           out = [0x00, 0x59, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff];
@@ -100,4 +109,35 @@ assert.equal(hex(bafter.presets[35]), hex(rec9d));
 assert.ok(bp.sent.some(f => hex(f) === "00 59 22 08 00 00 04 00 00 00 f0 00 00 00 0b"), "commit sent");
 bdev.selectPreset(35);
 assert.equal(hex(bp.sent.at(-1)), "00 59 22 09 00 00 04 23 00 00 e0 01 00 00 01 f6");
+
+// AMP models: LMT of a synthetic model as computed by the official native library, captured frames
+const AM4 = new Uint8Array(readFileSync(new URL("../am4_synthetic.am4data", import.meta.url)));
+const model = AM4.slice(0, am4.FILE_LEN);
+assert.equal(hex(am4.lmt(model)), hex(AM4.slice(am4.FILE_LEN)));
+assert.equal(hex(am4.uploadPayload(model)), hex(AM4));
+assert.throws(() => am4.check(model.slice(1)));
+assert.equal(am4.nameFromPath("2d43beb2-89c9-497c-a474-f55b863bd259_RANDALL_RG100ES_100W__1987__CH_Clean.am4data"),
+  "RANDALL RG100ES 100W 1987 CH Clean");
+assert.equal(hex(P.bleFrame(0x22, 0xa, 0, 1, [1], P.MEM_AMPCAB)), "00 59 22 09 00 00 05 00 00 00 a0 01 00 00 01 58");
+assert.equal(hex(P.bleFrame(0x22, 0xf, 2, 1, [0], P.MEM_AMPCAB)), "00 59 22 09 00 00 05 02 00 00 f0 01 00 00 00 07");
+assert.equal(hex(P.bleFrame(0x22, 0, 0, 1015, Array.from(model.slice(0, 1015)), P.MEM_AMPCAB).slice(0, 14)),
+  "00 59 22 ff 03 00 05 00 00 00 00 f7 03 00");
+const ap = fakeBlePedal(LIVE), adev = new P.TankGBle(ap), asteps = [];
+await adev.uploadAmp(2, AM4, (n, t) => asteps.push([n, t]));
+assert.deepEqual(Object.keys(ap.amps), ["2"]);
+assert.equal(hex(ap.amps[2]), hex(AM4));
+assert.deepEqual(ap.mem, Uint8Array.from(LIVE));
+assert.deepEqual(asteps.at(-1), [17, 17]);
+await assert.rejects(() => new P.TankG(P.fakePedal(LIVE, { latency: 1 })).uploadAmp(0, AM4), /Bluetooth/);
+
+// factory AMP/CAB restore: erase frames captured from M-EFCS, then the image in space 7
+assert.equal(hex(P.bleEraseFrame(0)), "00 59 21 05 00 00 05 00 00 00 70 8a");
+assert.equal(hex(P.bleEraseFrame(0x33000)), "00 59 21 05 00 00 05 00 30 03 70 57");
+const image = new Uint8Array(readFileSync(new URL("../../android/ui/factory/tankG_am4_ampCab.bin", import.meta.url)));
+const fp = fakeBlePedal(LIVE), fsteps = [];
+await new P.TankGBle(fp).restoreAmpCab(image, n => fsteps.push(n));
+assert.equal(fp.erased.size, 52);
+assert.ok(fp.flash.every((v, i) => v === image[i]), "flash == factory image");
+assert.equal(fsteps.at(-1), 52 + 210);
+await assert.rejects(() => new P.TankG(P.fakePedal(LIVE, { latency: 1 })).restoreAmpCab(image), /Bluetooth/);
 console.log("bluetooth framing ok");

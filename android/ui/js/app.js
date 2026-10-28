@@ -2,11 +2,12 @@
 // `device` = last bank read from the pedal, `local` = working copy; "modified" = slots that
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
-import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FIELDS, LEGAL, LIBRARY, RELEASES_REPO, VERSION } from "./data.js";
+import { AI, AMP_MODELS, BYTE_NAMES, CAB_MODELS, FACTORY, FACTORY_SETS, FIELDS, LEGAL, LIBRARY, RELEASES_REPO, VERSION } from "./data.js";
 import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 import { fromText as aiFromText, generate as generateAI, webPrompt, zoneGap } from "./ai.js";
 import { parseBankFile, parsePresetFile, parseSetFile, presetFile, setFile, stamp } from "./files.js";
 import * as cloud from "./cloud.js";
+import * as am4 from "./am4.js";
 
 const $ = id => document.getElementById(id);
 const F = Object.fromEntries(FIELDS.map(f => [f.key, f]));
@@ -33,11 +34,13 @@ const store = {
   set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ } },
 };
 const aliasKey = () => (S.demo ? "tankg.aliases.demo" : "tankg.aliases");
-let aliases = { presets: {}, banks: {} };
-const loadAliases = () => { aliases = store.get(aliasKey(), { presets: {}, banks: {} }); };
+let aliases = { presets: {}, banks: {}, amps: {} };
+const loadAliases = () => { aliases = { presets: {}, banks: {}, amps: {}, ...store.get(aliasKey(), {}) }; };
 const saveAliases = () => store.set(aliasKey(), aliases);
 const presetName = s => aliases.presets[slotName(s)] || "";
 const bankName = b => aliases.banks[String(b + 1)] || "";
+/** TYPE entry: the uploaded model's name when the slot no longer holds the factory one. */
+const ampLabel = i => `${i + 1}. ${aliases.amps?.[String(i + 1)] || AMP_MODELS[i]}`;
 function setPresetName(s, name) {
   name = (name || "").trim();
   if (name) aliases.presets[slotName(s)] = name; else delete aliases.presets[slotName(s)];
@@ -88,7 +91,7 @@ function buildModules() {
       const wrap = document.createElement("div");
       wrap.className = m.select === "cab" ? "mbody" : "mselect";
       wrap.innerHTML = (m.select === "cab" ? '<span class="led"></span>' : "") + `<select data-key="${m.select}" aria-label="${m.title}">` +
-        names.map((n, i) => `<option value="${i}">${m.select === "cab" ? (i ? `${i}. ${n}` : n) : `${i + 1}. ${n}`}</option>`).join("") +
+        names.map((n, i) => `<option value="${i}">${m.select === "cab" ? (i ? `${i}. ${n}` : n) : ampLabel(i)}</option>`).join("") +
         "</select>";
       wrap.querySelector("select").onchange = e => { pushUndo(); setField(m.select, +e.target.value); };
       el.append(wrap);
@@ -206,6 +209,7 @@ function render() {
     const sw = el.querySelector(".switch");
     if (sw) { sw.textContent = on ? "ON" : "OFF"; sw.classList.toggle("on", on); }
     const sel = el.querySelector("select");
+    if (sel?.dataset.key === "amp_type") [...sel.options].forEach((o, i) => { o.textContent = ampLabel(i); });
     if (sel) sel.value = get(sel.dataset.key);
     for (const fd of el.querySelectorAll(".fader")) paintFader(fd, get(fd.dataset.fader));
   }
@@ -691,7 +695,7 @@ function presetMenu(slot) {
     ["Revertir este preset", "revert", mod], ["Biblioteca de sonidos", "library", true], ["Crear con IA…", "ai", true],
     ["Copiar", "copy", true], ["Pegar", "paste", !!S.clipboard], ["Duplicar en otro slot…", "duplicate", true],
     ["Intercambiar con otro slot…", "swap", true], ["Renombrar preset", "rename", true],
-    ["Exportar preset", "exportPreset", true], ["Restaurar de fábrica", "factory", !!FACTORY],
+    ["Exportar preset", "exportPreset", true], ["Restaurar de fábrica", "factory", !!factoryHex()],
   ];
   modal({ title: `${slotName(slot)}${presetName(slot) ? ` · ${presetName(slot)}` : ""}`, cancel: "Cerrar" });
   const box = document.createElement("div");
@@ -705,6 +709,127 @@ function presetMenu(slot) {
   }
   $("mBody").append(box);
   $("mClose").onclick = closeModal;
+}
+
+// AMP models (.am4data, Bluetooth only; same as the desktop AmpUploadDialog) ---------------------
+
+function pickAmpSlot() {
+  return new Promise(resolve => {
+    modal({ title: "Espacio de AMP", step: "Elige qué modelo de AMP (perilla TYPE) se reemplaza:", cancel: "Cancelar" });
+    const box = document.createElement("div");
+    box.className = "acts";
+    const current = S.local ? get("amp_type") : -1;
+    for (let i = 0; i < AMP_MODELS.length; i++) {
+      const b = document.createElement("button");
+      b.textContent = ampLabel(i) + (i === current ? "  (preset actual)" : "");
+      b.onclick = () => { closeModal(); resolve(i); };
+      box.append(b);
+    }
+    $("mBody").append(box);
+    $("mClose").onclick = () => { closeModal(); resolve(null); };
+  });
+}
+
+async function uploadAmpModel() {
+  if (S.busy) return toast("Hay una operación en curso");
+  const f = await pickFile(".am4data,application/octet-stream");
+  if (!f) return;
+  const data = new Uint8Array(await f.arrayBuffer());
+  try { am4.check(data); } catch (e) { return info("Subir modelo de AMP", `${f.name}: ${e.message}`); }
+  const typed = await promptText("Subir modelo de AMP", "Nombre que mostrará la app:", am4.nameFromPath(f.name));
+  if (typed === null) return;
+  const slot = await pickAmpSlot();
+  if (slot === null) return;
+  const name = typed.trim() || `AMP ${slot + 1}`;
+  if (!(await ask("Subir modelo de AMP", `Se reemplazará el ${ampLabel(slot)} de la pedalera por «${name}». Todos los presets `
+    + "que usan ese TYPE sonarán con el modelo nuevo. Para volver al original: Menú → Restaurar AMP/CAB de fábrica.\n"
+    + "¿Continuar?"))) return;
+  if (!S.dev) return info("Subir modelo de AMP", "Pedalera no conectada: enciéndela con Bluetooth y espera a que la app se conecte.");
+  S.busy = true;
+  modal({ title: "Subiendo modelo de AMP", step: "Calculando el bloque LMT del modelo…", bar: true });
+  $("mClose").disabled = true;
+  const step = (text, cls = "") => { $("mStep").textContent = text; $("mStep").className = cls; };
+  try {
+    await new Promise(r => setTimeout(r, 50));   // paint the dialog before the computation
+    const payload = am4.uploadPayload(data);
+    await S.dev.uploadAmp(slot, payload, (n, total, text) => {
+      $("mBar").firstElementChild.style.width = `${(n / total) * 100}%`;
+      step(text);
+    });
+    aliases.amps = { ...(aliases.amps || {}), [String(slot + 1)]: name };
+    saveAliases();
+    $("mBar").firstElementChild.style.width = "100%";
+    step(`✓ AMP ${slot + 1} reemplazado por «${name}»`, "ok");
+  } catch (e) {
+    step(`✗ ${e instanceof DeviceError ? e.message : `Error inesperado: ${e.message}`}`, "bad");
+  } finally {
+    $("mClose").disabled = false;
+    $("mClose").onclick = closeModal;
+    S.busy = false;
+    render();
+  }
+}
+
+/** Factory AMP/CAB models of set AM4 or AM3 and, optionally, its 36 presets (desktop FactoryAmpCabDialog). */
+async function restoreFactoryAmpCab() {
+  if (S.busy) return toast("Hay una operación en curso");
+  const choice = await new Promise(resolve => {
+    modal({ title: "Restaurar AMP/CAB de fábrica", cancel: "Cancelar",
+      step: "Vuelve a escribir los 9 AMP y 8 CAB que trae la pedalera, igual que M-EFCS (borra los modelos subidos; "
+        + "unos 40 s por Bluetooth). Con presets se hace antes un backup del banco y se pierden los cambios sin guardar." });
+    const box = document.createElement("div");
+    box.className = "acts";
+    for (const [kind, label] of Object.entries(FACTORY_SETS))
+      for (const presets of [true, false]) {
+        const b = document.createElement("button");
+        b.textContent = `${label}${kind === "am4" ? " (modelos nuevos)" : " (original)"} · ${presets ? "AMP/CAB y 36 presets" : "solo AMP/CAB"}`;
+        b.onclick = () => { closeModal(); resolve({ kind, presets }); };
+        box.append(b);
+      }
+    $("mBody").append(box);
+    $("mClose").onclick = () => { closeModal(); resolve(null); };
+  });
+  if (!choice) return;
+  const { kind, presets } = choice, label = FACTORY_SETS[kind];
+  if (!(await ask("Restaurar de fábrica", `Se reemplazarán los AMP/CAB${presets ? " y los 36 presets" : ""} de la pedalera `
+    + `por los de fábrica ${label}.\n¿Continuar?`))) return;
+  if (!S.dev) return info("Restaurar de fábrica", "Pedalera no conectada: enciéndela con Bluetooth y espera a que la app se conecte.");
+  S.busy = true;
+  modal({ title: `Restaurando fábrica ${label}`, step: "Preparando…", bar: true });
+  $("mClose").disabled = true;
+  const step = (text, cls = "") => { $("mStep").textContent = text; $("mStep").className = cls; };
+  try {
+    const res = await fetch(`factory/tankG_${kind}_ampCab.bin`);
+    if (!res.ok) throw new Error(`faltan los modelos de fábrica ${label}`);
+    const image = new Uint8Array(await res.arrayBuffer());
+    step("Backup previo del banco…");
+    const before = await S.dev.readBank();
+    backup(before, "auto");
+    await S.dev.restoreAmpCab(image, (n, total, text) => {
+      $("mBar").firstElementChild.style.width = `${(n / total) * (presets ? 90 : 100)}%`;
+      step(text);
+    });
+    if (presets) {
+      const target = Bank.fromBytes(fromHex(FACTORY[kind]));
+      const after = await S.dev.writePresets(target, target.diffSlots(before), (n, t, s) =>
+        step(s === null ? "Verificando los presets…" : `Presets de fábrica ${n + 1} de ${t}…`));
+      if (S.local) pushUndo();
+      S.device = after;
+      S.local = after.copy();
+    }
+    aliases.amps = {};
+    saveAliases();
+    store.set("tankg.factorySet", kind);
+    $("mBar").firstElementChild.style.width = "100%";
+    step(`✓ Pedalera restaurada a fábrica ${label}`, "ok");
+  } catch (e) {
+    step(`✗ ${e instanceof DeviceError ? e.message : `Error inesperado: ${e.message}`}`, "bad");
+  } finally {
+    $("mClose").disabled = false;
+    $("mClose").onclick = closeModal;
+    S.busy = false;
+    render();
+  }
 }
 
 // files -------------------------------------------------------------------------------------------
@@ -765,9 +890,13 @@ function swapSlots(a, b) {
   render();
 }
 
+/** Factory set ("am4"/"am3") last restored on the pedal; the editor's factory presets follow it. */
+const factorySet = () => (FACTORY_SETS[store.get("tankg.factorySet", "am4")] ? store.get("tankg.factorySet", "am4") : "am4");
+const factoryHex = (kind = factorySet()) => FACTORY[kind];
+
 function restoreFactory(slots) {
-  if (!FACTORY) return info("Fábrica", "Esta versión no incluye el banco de fábrica.");
-  const factory = Bank.fromBytes(fromHex(FACTORY));
+  if (!factoryHex()) return info("Fábrica", "Esta versión no incluye el banco de fábrica.");
+  const factory = Bank.fromBytes(fromHex(factoryHex()));
   pushUndo();
   for (const s of slots) S.local.presets[s] = Uint8Array.from(factory.presets[s]);
   render();
@@ -1072,7 +1201,7 @@ async function cloudPush(quiet = true) {
 function loadCloud(r) {
   pushUndo();
   S.local = r.bank;
-  aliases = { presets: r.presets, banks: r.banks };
+  aliases = { ...aliases, presets: r.presets, banks: r.banks };
   saveAliases();
   render();
   toast("Presets de la nube cargados. «Guardar» los pasa a la pedalera.", 4500);
@@ -1121,7 +1250,7 @@ async function cloudHistory() {
 
 async function run(cmd) {
   $("menuSheet").hidden = true;
-  const needLocal = !["read", "demo", "about", "view", "port", "update", "calibrate", "backups", "cloudConnect", "cloudDisconnect"].includes(cmd);
+  const needLocal = !["read", "demo", "about", "view", "port", "ampUpload", "factoryAmpCab", "update", "calibrate", "backups", "cloudConnect", "cloudDisconnect"].includes(cmd);
   if (needLocal && !S.local) return info("Sin datos", "Conecta la pedalera o abre un archivo de banco.");
   const cur = S.current, bankFirst = Math.floor(cur / 4) * 4;
   switch (cmd) {
@@ -1151,6 +1280,8 @@ async function run(cmd) {
       return saveAll();
     }
     case "port": return openPorts();
+    case "ampUpload": return uploadAmpModel();
+    case "factoryAmpCab": return restoreFactoryAmpCab();
     case "calibrate": $("calSheet").hidden = false; return;
     case "undo": return $("undo").click();
     case "copy": S.clipboard = Uint8Array.from(S.local.presets[cur]); return toast(`Preset ${slotName(cur)} copiado`);
@@ -1350,7 +1481,7 @@ function wire() {
     const u = S.undo.pop();
     if (!u) return;
     S.local = u.bank;
-    aliases = JSON.parse(u.aliases);
+    aliases = { ...JSON.parse(u.aliases), amps: aliases.amps };   // the AMP models live in the pedal, not in the undo history
     saveAliases();
     render();
   };

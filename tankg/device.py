@@ -24,8 +24,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import bleproto, sysex
-from .model import BANK_LEN, Bank, Preset, REC_LEN, SLOTS
+from . import am4, bleproto, sysex
+from .model import AMP_MODELS, BANK_LEN, Bank, Preset, REC_LEN, SLOTS
 
 USB_ID = "4c4a:c755"   # generic Jieli id, shared by other M-VAVE pedals
 PORT_NAME = "USB Composite Device"   # MIDI port name of the Jieli chip on every OS
@@ -405,6 +405,17 @@ class TankG:
                 error = e
         raise error
 
+    @classmethod
+    def open_bluetooth(cls) -> "TankG":
+        """The pedal over Bluetooth even when USB is connected (operations that only exist there)."""
+        from .library import Settings
+        saved = Settings().ble
+        candidates = [DeviceInfo("ble", *saved)] if saved else scan_bluetooth()
+        if not candidates:
+            raise DeviceError("No se encontró la Tank-G por Bluetooth. Enciéndela, desconéctala de la app "
+                              "del teléfono y elígela en Pedalera → Puerto MIDI…")
+        return cls.open(candidates[0])
+
     def close(self) -> None:
         self.t.close()
 
@@ -479,6 +490,15 @@ class TankG:
             raise ValueError("slot out of range")
         self.t.write(bytes([0xC0, slot]))
 
+    def upload_amp(self, slot: int, payload: bytes, progress=None) -> None:
+        # The model upload was captured over Bluetooth only; its USB form is unknown.
+        raise DeviceError("Subir modelos de AMP solo funciona con la pedalera conectada por Bluetooth "
+                          "(Pedalera → Puerto MIDI… → elige la Tank-G Bluetooth).")
+
+    def restore_ampcab(self, image: bytes, progress=None) -> None:
+        raise DeviceError("Restaurar los AMP/CAB de fábrica solo funciona con la pedalera conectada por Bluetooth "
+                          "(Pedalera → Puerto MIDI… → elige la Tank-G Bluetooth).")
+
     def write_presets(self, target: Bank, slots: list[int], progress=None) -> Bank:
         """Write the given slots, then read back and verify. Returns the bank read back.
         No pause before the read-back: the pedal already returns the new data after the ACK
@@ -531,12 +551,56 @@ class TankGBle(TankG):
             raise DeviceError("La pedalera no respondió por Bluetooth.")
         return data
 
-    def write_mem(self, space: int, addr: int, data: bytes, what: str) -> None:
-        frame = bleproto.frame(bleproto.WRITE, space, addr, len(data), data)
+    def write_mem(self, space: int, addr: int, data: bytes, what: str, mem: int = bleproto.MEM_PRESETS) -> None:
+        frame = bleproto.frame(bleproto.WRITE, space, addr, len(data), data, mem)
         ok = self._ask(frame, lambda r: True if r.cmd == bleproto.ACK_CMD and r.payload == b"\x00" else None,
                        timeout=3.0, retries=1)
         if not ok:
             raise DeviceError(f"La pedalera no confirmó: {what}")
+
+    def upload_amp(self, slot: int, payload: bytes, progress=None) -> None:
+        """Replace AMP model `slot` (0-8) with `payload` (am4.upload_payload), the way M-EFCS does it:
+        stage the model, audition it, stage it again and save it into the slot."""
+        if not 0 <= slot < len(AMP_MODELS):
+            raise ValueError("AMP slot out of range")
+        if len(payload) != am4.UPLOAD_LEN:
+            raise ValueError("payload must come from am4.upload_payload")
+        chunks = range(0, len(payload), bleproto.AMP_CHUNK)
+        total = 2 * len(chunks) + 1
+        for n, (space, value) in enumerate(((bleproto.SPACE_AMP_AUDITION, 1), (bleproto.SPACE_AMP_SAVE, 0))):
+            for i, a in enumerate(chunks):
+                if progress:
+                    progress(f"Enviando el modelo… {i + 1}/{len(chunks)}", n * len(chunks) + i, total)
+                self.write_mem(bleproto.SPACE_AMP_STAGE, a, payload[a:a + bleproto.AMP_CHUNK],
+                               "envío del modelo", bleproto.MEM_AMPCAB)
+            addr = 0 if space == bleproto.SPACE_AMP_AUDITION else slot
+            self.write_mem(space, addr, bytes([value]), "prueba del modelo" if value else f"guardado en el AMP {slot + 1}",
+                           bleproto.MEM_AMPCAB)
+        if progress:
+            progress(f"AMP {slot + 1} guardado", total, total)
+
+    def restore_ampcab(self, image: bytes, progress=None) -> None:
+        """Rewrite the 9 AMP and 8 CAB models with a factory image (library.factory_ampcab), the way
+        M-EFCS restores them: erase the 52 sectors, then write the image in blocks."""
+        if len(image) != bleproto.AMPCAB_LEN:
+            raise ValueError("AMP/CAB image must be 212992 bytes")
+        sectors = range(0, len(image), bleproto.SECTOR)
+        blocks = range(0, len(image), bleproto.AMP_CHUNK)
+        total = len(sectors) + len(blocks)
+        for i, a in enumerate(sectors):
+            if progress:
+                progress(f"Borrando la memoria de modelos… {i + 1}/{len(sectors)}", i, total)
+            ok = self._ask(bleproto.erase_frame(a), lambda r: True if r.cmd == bleproto.ACK_CMD and r.payload == b"\x00"
+                           else None, timeout=3.0, retries=1)
+            if not ok:
+                raise DeviceError(f"La pedalera no confirmó el borrado del sector {i + 1}. Repite la restauración.")
+        for i, a in enumerate(blocks):
+            if progress:
+                progress(f"Escribiendo los modelos de fábrica… {i + 1}/{len(blocks)}", len(sectors) + i, total)
+            self.write_mem(bleproto.SPACE_FLASH, a, image[a:a + bleproto.AMP_CHUNK],
+                           "escritura de los modelos (repite la restauración)", bleproto.MEM_AMPCAB)
+        if progress:
+            progress("Modelos de AMP/CAB de fábrica restaurados", total, total)
 
     def read_bank(self, retries: int = 3) -> Bank:
         data = b"".join(self.read_mem(bleproto.SPACE_BANK, a, min(bleproto.CHUNK, BANK_LEN - a))
