@@ -3,6 +3,7 @@
 // device flow (google.com/device + a code): the code is copied and the page opened for the user.
 // The OAuth client comes from js/secrets.js, written by android/build.sh (never committed).
 import { Bank, fromHex, toHex } from "./protocol.js";
+import { clean as cleanSetlists } from "./setlist.js";
 
 const CLOUD = await import("./secrets.js").then(m => m.CLOUD || {}, () => ({}));
 const A = globalThis.AndroidMidi;
@@ -143,11 +144,12 @@ export class Drive {
 // sync -----------------------------------------------------------------------------------------
 
 /** Same as cloud.make_doc: "amps" (names of uploaded AMP models) only when there is one. */
-export function makeDoc(bank, presets, banks, amps = {}, ampSources = {}, presetAmps = {}) {
+export function makeDoc(bank, presets, banks, amps = {}, ampSources = {}, presetAmps = {}, setlists = []) {
   const aliases = { presets: { ...presets }, banks: { ...banks } };
   if (Object.keys(amps || {}).length) aliases.amps = { ...amps };
   if (Object.keys(ampSources || {}).length) aliases.ampSources = { ...ampSources };   // community origin of the models
   if (Object.keys(presetAmps || {}).length) aliases.presetAmps = { ...presetAmps };   // the captured amp of each pack preset
+  if ((setlists || []).length) aliases.setlists = cleanSetlists(setlists);              // the saved shows (setlist.js)
   return { format: FORMAT, version: 1, updated: new Date().toISOString().replace(/\.\d+Z$/, "+00:00"),
     device: "Android", bank: toHex(bank.toBytes()), aliases };
 }
@@ -156,7 +158,8 @@ export function parseDoc(doc) {
   if (doc?.format !== FORMAT) throw new CloudError("El archivo de la nube no es de Tank-G Control Center.");
   const a = doc.aliases || {};
   return { bank: Bank.fromBytes(fromHex(doc.bank)), presets: { ...(a.presets || {}) }, banks: { ...(a.banks || {}) },
-    amps: { ...(a.amps || {}) }, ampSources: { ...(a.ampSources || {}) }, presetAmps: { ...(a.presetAmps || {}) } };
+    amps: { ...(a.amps || {}) }, ampSources: { ...(a.ampSources || {}) }, presetAmps: { ...(a.presetAmps || {}) },
+    setlists: cleanSetlists(a.setlists) };
 }
 
 const sorted = v => (v && typeof v === "object" && !Array.isArray(v)

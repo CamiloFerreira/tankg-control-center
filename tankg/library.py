@@ -13,6 +13,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from . import setlist
 from .model import Bank, Preset, slot_name
 
 PRESET_FORMAT = "tankg-preset"
@@ -183,6 +184,7 @@ class Aliases:
         self.amps: dict[str, str] = {}
         self.amp_sources: dict[str, dict] = {}   # slot -> {"article", "file"}: the community model it came from
         self.preset_amps: dict[str, dict] = {}   # "9A" -> {"slot", "name", "source"}: the model a pack preset needs
+        self.setlists: list[dict] = []           # [{"title", "songs": [{"slot", "raw", "name", "note"}]}] (tankg/setlist.py)
         try:
             doc = _read_json(path)
             self.presets = {k: v for k, v in doc.get("presets", {}).items() if v}
@@ -190,6 +192,7 @@ class Aliases:
             self.amps = {k: v for k, v in doc.get("amps", {}).items() if v}
             self.amp_sources = {k: v for k, v in doc.get("amp_sources", {}).items() if v}
             self.preset_amps = {k: v for k, v in doc.get("preset_amps", {}).items() if v}
+            self.setlists = setlist.clean(doc.get("setlists"))
         except (OSError, ValueError):
             pass
 
@@ -197,7 +200,7 @@ class Aliases:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         _write_json(tmp, {"presets": self.presets, "banks": self.banks, "amps": self.amps, "amp_sources": self.amp_sources,
-                          "preset_amps": self.preset_amps})
+                          "preset_amps": self.preset_amps, "setlists": self.setlists})
         tmp.replace(self.path)
 
     def preset(self, slot: int) -> str:

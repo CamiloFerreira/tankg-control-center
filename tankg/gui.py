@@ -13,15 +13,15 @@ import time
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence
+from PySide6.QtCore import QObject, QRect, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMenu, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import am4, cloud, dialogs, library, pack, theme, updater
+from . import am4, cloud, dialogs, library, pack, setlist, theme, updater
 from .version import PRIVACY_URL, TERMS_URL, __version__
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_gap, zone_of
@@ -34,11 +34,16 @@ LIVE_DELAY_MS = 700
 
 STYLE = """
 /* Pedal panel and main-window specifics; shared rules live in theme.QSS. */
-QFrame#browser { background: #1d2228; border-radius: 10px; }
+QFrame#browser { background: #1d2228; border-radius: 12px; }
+QLabel#browserTitle { color: #8a96a3; font-weight: bold; letter-spacing: 2px; font-size: 12px; padding: 0 2px 4px; }
+QWidget#browserInner, QScrollArea#browserScroll, QScrollArea#browserScroll > QWidget > QWidget { background: transparent; }
+QFrame#bankCard { background: #191e23; border: 1px solid #2a323b; border-radius: 10px; }
 QPushButton#bankHead {
-    color: #8a96a3; font-weight: bold; text-align: left; border: none; padding: 0 2px; font-size: 11px;
+    color: #c9d1d9; font-weight: bold; text-align: left; border: none; padding: 2px 2px; font-size: 11px;
+    background: transparent;
 }
-QPushButton#bankHead:hover { color: #e6e6e6; }
+QPushButton#bankHead:hover { color: #ffffff; }
+QLabel#browserHint { color: #6b7480; font-size: 11px; padding-top: 4px; }
 QLineEdit#alias {
     background: transparent; color: #f4f4f4; border: none; border-bottom: 1px dashed #4a5561;
     font-size: 18px; padding: 2px 4px; min-width: 220px;
@@ -323,26 +328,78 @@ def two_lines(text: str, width: int = 9) -> str:
 
 
 class SlotButton(QPushButton):
+    """One preset of the browser, drawn as a tile like the library cards: a light strip in its
+    footswitch LED colour, the slot, its name, the AMP model and a dot when it has unsaved changes."""
     doubleClicked = Signal(int)
 
     def __init__(self, slot: int):
         super().__init__()
         self.slot = slot
         self.setObjectName("slot")
-        self.setMinimumSize(QSize(52, 40))
+        self.setMinimumSize(QSize(56, 58))
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.setCursor(Qt.PointingHandCursor)
+        self.state = (None, False, False, "")
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
+        p, selected, modified, alias = self.state
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        led = dialogs.led_color(p.color) if p else QColor(theme.BORDER_2)
+        hover = self.underMouse() and not selected
+        painter.setPen(QColor(theme.ACCENT_HOVER) if selected else QColor("#3a4450" if hover else theme.BORDER_2))
+        painter.setBrush(QColor("#1d4a44") if selected else QColor("#2b333c" if hover else theme.SURFACE_2))
+        painter.drawRoundedRect(r, 8, 8)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(led)
+        painter.drawRoundedRect(QRectF(r.left() + 6, r.top() + 4, r.width() - 12, 4), 2, 2)   # the footswitch light
+        painter.setFont(dialogs.scaled_font(self.font(), 0.9, True))
+        painter.setPen(QColor(theme.TEXT_DIM))
+        painter.drawText(QRectF(r.left() + 6, r.top() + 8, r.width() - 12, 12), Qt.AlignLeft | Qt.AlignVCenter,
+                         slot_name(self.slot))
+        if modified:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(theme.WARN))
+            painter.drawEllipse(QRectF(r.right() - 11, r.top() + 10, 6, 6))
+        painter.setFont(dialogs.scaled_font(self.font(), 1.02, True))
+        painter.setPen(QColor(theme.TEXT) if p else QColor(theme.TEXT_MUTED))
+        box = QRect(int(r.left()) + 4, int(r.top()) + 20, int(r.width()) - 8, int(r.height()) - 23)
+        painter.drawText(box, Qt.AlignHCenter | Qt.AlignVCenter,
+                         self._wrap(alias or (p.amp_name if p else "—"), painter.fontMetrics(), box.width()))
+
+    @staticmethod
+    def _wrap(text: str, fm, width: int) -> str:
+        """At most two lines that fit `width` pixels, the second one elided."""
+        lines, cur = [], ""
+        for word in text.split():
+            if cur and fm.horizontalAdvance(f"{cur} {word}") > width:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = f"{cur} {word}".strip()
+        lines.append(cur)
+        if len(lines) > 2:
+            lines = [lines[0], " ".join(lines[1:])]
+        return "\n".join(fm.elidedText(line, Qt.ElideRight, width) for line in lines)
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt API
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt API
+        self.update()
+        super().leaveEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt API
         self.doubleClicked.emit(self.slot)
 
     def show_preset(self, p: Preset | None, selected: bool, modified: bool, alias: str = "") -> None:
         amp = p.amp_name if p else "—"
-        self.setText(two_lines(alias or amp) + (" •" if modified else ""))
-        r, g, b = p.color if p else (60, 70, 80)
-        border = "#ffffff" if selected else f"rgb({r},{g},{b})"
-        bg = "#2f4f5c" if selected else "#262d35"
-        self.setStyleSheet(f"QPushButton#slot {{ border: 2px solid {border}; background: {bg}; }}")
+        self.setText(two_lines(alias or amp) + (" •" if modified else ""))   # accessible name; painted as a tile
+        self.state = (p, selected, modified, alias)
+        self.update()
         tip = f"Preset {slot_name(self.slot)}" + (f" — {alias}" if alias else "")
         if p:
             tip += f"\n{p.amp_name} / {p.cab_name}"
@@ -374,7 +431,7 @@ class MainWindow(QMainWindow):
         self.local: Bank | None = None
         self.current = 0
         self.clipboard: Preset | None = None
-        self.undo_stack: list[tuple[Bank, dict, dict]] = []   # bank + preset/bank names
+        self.undo_stack: list[tuple[Bank, dict, dict, dict]] = []   # bank + preset/bank names + AMP notes
         self.busy = False
         self._jobs: set[Job] = set()
         self.connected = False
@@ -426,44 +483,57 @@ class MainWindow(QMainWindow):
     # layout --------------------------------------------------------------------------
 
     def _build_browser(self) -> QWidget:
+        """The 36 presets: one card per bank (its name + four tiles A-D, like the footswitches)."""
         frame = QFrame()
         frame.setObjectName("browser")
-        frame.setFixedWidth(252)
+        frame.setFixedWidth(300)
         lay = QVBoxLayout(frame)
+        lay.setContentsMargins(10, 10, 4, 8)
         title = QLabel("PRESETS")
-        title.setObjectName("sectionTitle")
-        title.setStyleSheet("color: #8a96a3;")
+        title.setObjectName("browserTitle")
         lay.addWidget(title)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(2)
+        inner = QWidget()
+        inner.setObjectName("browserInner")
+        banks = QVBoxLayout(inner)
+        banks.setContentsMargins(0, 0, 6, 0)
+        banks.setSpacing(6)
         self.slot_buttons: list[SlotButton] = []
         self.bank_heads: list[QPushButton] = []
-        for letter in range(4):
-            col = QLabel("ABCD"[letter])
-            col.setAlignment(Qt.AlignCenter)
-            col.setStyleSheet("color: #8a96a3; font-weight: bold;")
-            grid.addWidget(col, 0, letter)
         for bank in range(9):
+            card = QFrame()
+            card.setObjectName("bankCard")
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(6, 4, 6, 6)
+            cl.setSpacing(3)
             head = QPushButton()
             head.setObjectName("bankHead")
             head.setCursor(Qt.PointingHandCursor)
             head.setToolTip("Clic para poner nombre al banco")
             head.clicked.connect(lambda _=False, n=bank: self.rename_bank(n))
-            grid.addWidget(head, bank * 2 + 1, 0, 1, 4)
+            cl.addWidget(head)
             self.bank_heads.append(head)
+            row = QHBoxLayout()
+            row.setSpacing(4)
             for letter in range(4):
                 b = SlotButton(bank * 4 + letter)
                 b.clicked.connect(lambda _=False, s=b.slot: self.select_slot(s))
                 b.doubleClicked.connect(lambda s: (self.select_slot(s), self.activate_selected()))
                 b.customContextMenuRequested.connect(lambda pos, s=b.slot: self._slot_menu(s, pos))
-                grid.addWidget(b, bank * 2 + 2, letter)
+                row.addWidget(b)
                 self.slot_buttons.append(b)
-            grid.setRowMinimumHeight(bank * 2 + 1, 18)
-        lay.addLayout(grid)
-        lay.addStretch()
-        hint = QLabel("• = sin guardar · doble clic: activar\nclic derecho: copiar, duplicar, fábrica…")
-        hint.setStyleSheet("color: #6b7480; font-size: 11px;")
+            cl.addLayout(row)
+            banks.addWidget(card)
+        banks.addStretch()
+        scroll = QScrollArea()
+        scroll.setObjectName("browserScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(inner)
+        lay.addWidget(scroll, 1)
+        hint = QLabel("● = sin guardar · doble clic: activar · clic derecho: más opciones")
+        hint.setObjectName("browserHint")
+        hint.setWordWrap(True)
         lay.addWidget(hint)
         return frame
 
@@ -626,6 +696,8 @@ class MainWindow(QMainWindow):
         act("undo", "Deshacer", self.undo, "Ctrl+Z", "Deshacer el último cambio (Ctrl+Z)")
         act("library", "Biblioteca de sonidos", self.open_artists, "Ctrl+L",
             "Biblioteca: más de 500 presets de bandas y estilos, listos para usar (Ctrl+L)")
+        act("setlists", "Setlists", self.open_setlists, "Ctrl+J",
+            "Setlists: tus shows en orden, con notas y modo escenario (Ctrl+J)")
         act("ai", "Crear con IA", self.open_ai, "Ctrl+K", "Describe un sonido y la IA crea el preset (Ctrl+K)")
         act("copy", "Copiar", self.copy_preset, "Ctrl+C")
         act("paste", "Pegar", self.paste_preset, "Ctrl+V")
@@ -653,9 +725,14 @@ class MainWindow(QMainWindow):
         tb = QToolBar("Principal")
         tb.setObjectName("main")
         tb.setMovable(False)
-        tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        tb.setIconSize(QSize(18, 18))
         self.addToolBar(tb)
-        for key in ("menu", None, "read", "send_all", "undo", None, "library", "ai"):
+        icons = {"read": "refresh", "send_all": "save", "undo": "undo", "library": "library", "setlists": "setlist",
+                 "ai": "ai", "live": "live"}   # line icons of tankg/menu.py, like the APK
+        for key, name in icons.items():
+            self.act[key].setIcon(QIcon(dialogs.menu_icon(name, "#ffffff" if key == "send_all" else "#8fe0be", 18)))
+        for key in ("menu", None, "read", "send_all", "undo", None, "library", "setlists", "ai"):
             if key is None:
                 tb.addSeparator()
             else:
@@ -690,7 +767,7 @@ class MainWindow(QMainWindow):
         """command -> keyboard shortcut shown in the menu."""
         keys = {"read": "read", "saveAll": "send_all", "saveOne": "send_one", "activate": "activate", "undo": "undo",
                 "copy": "copy", "paste": "paste", "duplicate": "duplicate", "left": "left", "right": "right",
-                "renameBank": "rename_bank", "library": "library", "ai": "ai", "backupNow": "backup"}
+                "renameBank": "rename_bank", "library": "library", "setlist": "setlists", "ai": "ai", "backupNow": "backup"}
         out = {cmd: self.act[k].shortcut().toString(QKeySequence.NativeText) for cmd, k in keys.items()}
         out.update({"openBank": "Ctrl+O", "saveBank": "Ctrl+S", "importPreset": "Ctrl+I", "exportPreset": "Ctrl+E"})
         return {c: k for c, k in out.items() if k}
@@ -709,7 +786,7 @@ class MainWindow(QMainWindow):
         state = {"saveAll": dev and bool(mod), "saveOne": dev and cur_mod, "activate": dev, "live": dev,
                  "undo": bool(self.undo_stack), "paste": self.clipboard is not None, "revert": cur_mod,
                  "revertAll": bool(mod), "backupNow": dev, "restoreFile": dev, "cloudPush": has, "cloudPull": has}
-        for cmd in ("copy", "duplicate", "swap", "left", "right", "renameBank", "library", "ai", "factory",
+        for cmd in ("copy", "duplicate", "swap", "left", "right", "setlist", "renameBank", "library", "ai", "factory",
                     "factoryBank", "factoryAll", "saveBank", "importPreset", "exportPreset", "importSet", "exportSet",
                     "compare", "bytes", "exportPack"):
             state[cmd] = state.get(cmd, True) and has
@@ -727,7 +804,7 @@ class MainWindow(QMainWindow):
             "activate": self.activate_selected, "live": lambda: self.live_action.setChecked(not self.live_action.isChecked()),
             "port": self.choose_midi_port, "undo": self.undo, "copy": self.copy_preset, "paste": self.paste_preset,
             "duplicate": self.duplicate_preset, "swap": self.swap_preset, "left": lambda: self.move_preset(-1),
-            "right": lambda: self.move_preset(1), "renameBank": lambda: self.rename_bank(self.current // 4),
+            "right": lambda: self.move_preset(1), "setlist": self.open_setlists, "renameBank": lambda: self.rename_bank(self.current // 4),
             "revert": self.revert_selected, "revertAll": self.revert_all, "library": self.open_artists, "ai": self.open_ai,
             "factory": self.factory_selected, "factoryBank": self.factory_current_bank, "factoryAll": self.factory_all,
             "ampUpload": self.upload_amp_model, "factoryAmpCab": lambda: dialogs.FactoryAmpCabDialog(self).exec(),
@@ -777,7 +854,8 @@ class MainWindow(QMainWindow):
 
     def _push_undo(self) -> None:
         if self.local is not None:
-            self.undo_stack.append((self.local.copy(), dict(self.aliases.presets), dict(self.aliases.banks)))
+            self.undo_stack.append((self.local.copy(), dict(self.aliases.presets), dict(self.aliases.banks),
+                                    dict(self.aliases.preset_amps)))
             del self.undo_stack[:-200]
 
     def _set_local(self, slot: int, preset: Preset) -> None:
@@ -794,7 +872,7 @@ class MainWindow(QMainWindow):
             b.show_preset(p, b.slot == self.current, b.slot in modified, self.aliases.preset(b.slot))
         for n, head in enumerate(self.bank_heads):
             alias = self.aliases.bank(n)
-            head.setText(f"BANCO {n + 1}" + (f" · {alias}" if alias else ""))
+            head.setText(f"BANCO {n + 1}" + (f"  ·  {alias}" if alias else ""))
         name = slot_name(self.current)
         self.title.setText(name)
         if not self.alias_edit.hasFocus():
@@ -1377,9 +1455,9 @@ class MainWindow(QMainWindow):
 
     def undo(self) -> None:
         if self.undo_stack:
-            self.local, presets, banks = self.undo_stack.pop()
-            if (presets, banks) != (self.aliases.presets, self.aliases.banks):
-                self.aliases.presets, self.aliases.banks = presets, banks
+            self.local, presets, banks, needs = self.undo_stack.pop()
+            if (presets, banks, needs) != (self.aliases.presets, self.aliases.banks, self.aliases.preset_amps):
+                self.aliases.presets, self.aliases.banks, self.aliases.preset_amps = presets, banks, needs
                 self.aliases.save()
             self.refresh()
             self._schedule_live()
@@ -1423,6 +1501,21 @@ class MainWindow(QMainWindow):
         p[a], p[b] = p[b], p[a]
         self.current = b
         self.refresh()
+
+    def apply_setlist(self, order: list[int], start: int) -> None:
+        """Puts the songs of a show in footswitch order from `start` (dialogs.SetlistDialog)."""
+        source = setlist.layout(order, start)
+        self._push_undo()
+        self.local = setlist.apply(self.local, source)
+        self.aliases.presets = setlist.move_names(self.aliases.presets, source)
+        self.aliases.preset_amps = setlist.move_names(self.aliases.preset_amps, source)
+        self.aliases.save()
+        self.current = start
+        self.refresh()
+        moved = len(self.modified_slots()) if self.device is not None else sum(n != o for n, o in enumerate(source))
+        self.statusBar().showMessage(f"Setlist armado de {slot_name(start)} a {slot_name(start + len(order) - 1)}. "
+                                     + (f"«Guardar todo» pasa a la pedalera los {moved} presets cambiados." if moved
+                                        else "No hubo que mover nada."), 8000)
 
     def _factory(self) -> Bank | None:
         if not self._need_local():
@@ -1512,6 +1605,10 @@ class MainWindow(QMainWindow):
     def open_artists(self) -> None:
         if self._need_local():
             dialogs.ArtistLibrary(self).exec()
+
+    def open_setlists(self) -> None:
+        if self._need_local():
+            dialogs.SetlistDialog(self).exec()
 
     def run_job(self, fn, on_done, label: str) -> bool:
         """For dialogs: run fn(dev, report) in the background."""
@@ -1690,7 +1787,8 @@ class MainWindow(QMainWindow):
         """What the cloud mirrors: the editor (or the pedal if nothing is loaded) and the names."""
         bank = self.local or self.device
         return (cloud.make_doc(bank, self.aliases.presets, self.aliases.banks, amps=self.aliases.amps,
-                               amp_sources=self.aliases.amp_sources, preset_amps=self.aliases.preset_amps)
+                               amp_sources=self.aliases.amp_sources, preset_amps=self.aliases.preset_amps,
+                               setlists=self.aliases.setlists)
                 if bank is not None else None)
 
     def _cloud_status(self, text: str) -> None:
@@ -1821,6 +1919,7 @@ class MainWindow(QMainWindow):
         self.aliases.amps = cloud.doc_amps(doc)
         self.aliases.amp_sources = cloud.doc_amp_sources(doc)
         self.aliases.preset_amps = cloud.doc_preset_amps(doc)
+        self.aliases.setlists = cloud.doc_setlists(doc)
         self.aliases.save()
         self.refresh_amp_labels()
         self.refresh()

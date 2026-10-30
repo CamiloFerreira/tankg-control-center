@@ -59,6 +59,7 @@ Windows/Linux (`tankg/`, PySide6) and Android (`android/`) are the same product.
 | MIDI port / Bluetooth pedal choice | `MidiPortDialog` (scan with bleak) | port sheet (bonded pedals) |
 | Calibration wizard | `CalibrationWizard` | calibration sheet |
 | Undo, copy/paste, duplicate, swap, move | ☰ Menú, shortcuts, right click | menu, long press |
+| Setlists (saved in `Aliases.setlists` + cloud doc `aliases.setlists`; songs = slot + raw + name + note, found again by `resolve()`; stage mode; optional footswitch order by swaps; list to share; `tankg/setlist.py` ↔ `js/setlist.js`) | toolbar «Setlists» (Ctrl+J), ☰ Menú, `SetlistDialog`, `StageWindow` (fullscreen, arrows/space/PgUp/PgDn) | toolbar (tablet), bottom bar «Setlists», menu → `setSheet`, `#stage` (tap/keys, `AndroidMidi.keepAwake`) |
 | Preset / bank names, LED colour | alias field, bank head, LED button | alias field, bank tag, LED button |
 | Band library | `ArtistLibrary` | library sheet |
 | AI (browser + API keys) | `AIDialog` | AI sheet (`ai.js`; native HTTP bridge in the APK) |

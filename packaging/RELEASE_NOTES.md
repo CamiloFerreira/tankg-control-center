@@ -11,6 +11,20 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
+## Novedades (1.10.0)
+
+- **Setlists y modo escenario.** Botón «Setlists» junto a la Biblioteca (Ctrl+J; en Android, en la barra de abajo).
+  - Guarda todos los shows que quieras, con los presets en el orden en que los vas a tocar y una nota por canción
+    (afinación, capo, tempo…). Se sincronizan con Google Drive y cada canción encuentra su preset aunque lo muevas.
+  - **Modo escenario**: pantalla completa con letras enormes sobre un brillo del color del LED del preset, barra
+    de progreso y la canción que sigue. Flechas, barra espaciadora, Re Pág/Av Pág (pedales pasa-páginas), tocar
+    o deslizar la pantalla pasan de canción y la activan en la pedalera. En Android la pantalla no se apaga.
+  - **Ordenar** (opcional): deja las canciones seguidas desde el slot que elijas (1A, 1B, 1C, 1D, 2A…) para
+    pasarlas con los footswitches; solo se mueven los presets necesarios y se deshace con Ctrl+Z.
+  - «Copiar lista» da el setlist con slot y nota de cada canción, para imprimir o mandar a la banda.
+- **Interfaz renovada.** La lista de presets, la Biblioteca y los Setlists usan tarjetas con el color del LED de
+  cada preset, su AMP y su descripción; las barras tienen íconos; en Android hay una pantalla de inicio nueva.
+
 ## Novedades (1.9.1)
 
 - **Valores de fábrica «Original (de caja)».** «Restaurar de fábrica» ahora deja los presets tal como vienen en

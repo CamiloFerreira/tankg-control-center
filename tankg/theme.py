@@ -58,6 +58,29 @@ QLabel#step {{ background: {ACCENT}; color: white; border-radius: 11px; font-wei
               min-width: 22px; max-width: 22px; min-height: 22px; max-height: 22px; }}
 QLabel#hint {{ color: {TEXT_DIM}; font-size: 12px; }}
 
+/* stage mode (dialogs.StageWindow): readable from a few metres away; its background is painted */
+QLabel#stageDim {{ color: {TEXT_DIM}; font-size: 20px; font-weight: bold; background: transparent; }}
+QProgressBar#stageProgress {{ background: {SURFACE_2}; border: none; border-radius: 3px; }}
+QProgressBar#stageProgress::chunk {{ background: {ACCENT_HOVER}; border-radius: 3px; }}
+QLabel#stageSlot {{ font-size: 110px; font-weight: 900; background: transparent; }}
+QLabel#stageAmp {{ color: {TEXT_DIM}; font-size: 20px; letter-spacing: 1px; background: transparent; }}
+QLabel#stageName {{ color: #ffffff; font-size: 68px; font-weight: bold; background: transparent; }}
+QLabel#stageNote {{ color: {WARN}; font-size: 30px; background: transparent; }}
+QLabel#stageWarn {{ color: {ERROR}; font-size: 18px; background: transparent; }}
+QFrame#stageNextCard {{ background: rgba(38, 45, 53, 200); border: 1px solid {BORDER_2}; border-radius: 14px; }}
+QLabel#stageCaption {{ color: {TEXT_MUTED}; font-size: 13px; font-weight: bold; letter-spacing: 2px; background: transparent; }}
+QLabel#stageNext {{ color: {TEXT}; font-size: 26px; font-weight: bold; background: transparent; }}
+QPushButton#stageButton {{ background: {SURFACE_2}; color: {TEXT}; border: 1px solid {BORDER_2}; border-radius: 14px;
+    font-size: 24px; font-weight: bold; padding: 22px 34px; }}
+QPushButton#stageButton:hover {{ background: #2f3842; }}
+QPushButton#stageButton[primary="true"] {{ background: {ACCENT}; border-color: {ACCENT_HOVER}; color: white; }}
+QPushButton#stageButton[primary="true"]:hover {{ background: {ACCENT_HOVER}; }}
+QPushButton#stageButton:disabled {{ color: {TEXT_MUTED}; background: {SURFACE_2}; border-color: {BORDER_2}; }}
+
+/* setlist window lists: rows are cards painted by dialogs.CardDelegate */
+QListWidget#cards {{ background: {FIELD}; border: 1px solid {BORDER}; border-radius: 10px; padding: 4px; outline: none; }}
+QListWidget#cards::item {{ background: transparent; border: none; }}
+
 /* inputs */
 QLineEdit, QPlainTextEdit, QTextEdit {{
     background: {FIELD}; color: #f0f0f0; border: 1px solid {BORDER_2}; border-radius: 8px; padding: 6px;

@@ -340,6 +340,15 @@ public class MainActivity extends Activity {
             ble.close();
         }
 
+        /** Stage mode: the screen stays on while the setlist is shown. */
+        @JavascriptInterface
+        public void keepAwake(boolean on) {
+            runOnUiThread(() -> {
+                if (on) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            });
+        }
+
         @JavascriptInterface
         public String version() {
             try {

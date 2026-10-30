@@ -28,7 +28,7 @@ def test_ui_protocol():
 def test_ui_ai_and_files_match_python(tmp_path):
     """Same apply_design, browser prompt and interchangeable .tgpreset/.tgset files in JS and Python."""
     import json
-    from tankg import ai, am4, artists, library, pack
+    from tankg import ai, am4, artists, library, pack, setlist
     from tankg.model import FIELDS, Bank, Preset, zone_gap
     live = (ROOT / "tests/live_bank.bin").read_bytes()
     bank = Bank.from_bytes(live)
@@ -52,6 +52,9 @@ def test_ui_ai_and_files_match_python(tmp_path):
     aliases.set_preset(8, "Ocho")
     set_py = tmp_path / "s.tgset"
     library.save_set(bank, [8, 9, 10, 11], set_py, aliases, "Banco 3")
+    names = {"1A": "Cierre ñ", "2A": "Intro"}
+    songs = [setlist.song(bank, names, s, n) for s, n in ((4, "capo 2"), (20, ""), (0, "fade"))]
+    songs.append(dict(setlist.song(bank, names, 9), raw="00" * 21))   # edited and unnamed: lost
     golden = {"designs": designs, "prompts": prompts, "presetPy": preset_py.read_text(), "presetRaw": bank.presets[3].to_bytes().hex(),
               "presetName": "Mi Preset ñ", "setPy": set_py.read_text(), "setTitle": "Banco 3",
               "setRaws": [bank.presets[s].to_bytes().hex() for s in range(8, 12)], "bank": live.hex(),
@@ -59,7 +62,18 @@ def test_ui_ai_and_files_match_python(tmp_path):
               "am4Tables": {"sig": am4._SIG, "tanh": am4._TANH},
               "packPy": json.dumps(pack.make(bank, [4, 5, 6, 7], {4: "Uno ñ"}, {"2": "Banco"}, {str(bank.presets[4].amp + 1): "Mi AMP"},
                                              {bank.presets[4].amp: (ROOT / "tests/am4_synthetic.am4data").read_bytes()[:7868]}, "Pack")[0]),
-              "packAmp": bank.presets[4].amp}
+              "packAmp": bank.presets[4].amp,
+              "setlist": [{"order": o, "start": st, "source": setlist.layout(o, st),
+                           "names": setlist.move_names({"6A": "Intro", "1B": "Cierre ñ"}, setlist.layout(o, st)),
+                           "songs": setlist.refresh(songs, setlist.apply(bank, setlist.layout(o, st)),
+                                                    setlist.move_names(names, setlist.layout(o, st))),
+                           "slots": setlist.resolve(songs, setlist.apply(bank, setlist.layout(o, st)),
+                                                    setlist.move_names(names, setlist.layout(o, st)))}
+                          for o, st in [([20, 3, 0, 35, 5], 2), ([0, 1, 2], 0), ([35, 34, 33, 32], 30), (list(range(36))[::-1], 0)]],
+              "setlistSongs": songs, "setlistNames": names,
+              "setlistText": setlist.text("Show ", songs + [{"slot": "9D", "raw": "", "name": "", "note": ""}], [3, 7, 0, None, None]),
+              "setlistDirty": [{"title": "", "songs": [{"slot": "6A", "raw": "00ff", "name": 3}, {"slot": "77", "raw": "x"}, 5]}, 3],
+              "setlistClean": setlist.clean([{"title": "", "songs": [{"slot": "6A", "raw": "00ff", "name": 3}, {"slot": "77", "raw": "x"}, 5]}, 3])}
     golden_pack = json.loads(golden["packPy"])
     gfile = tmp_path / "golden.json"
     gfile.write_text(json.dumps(golden, ensure_ascii=False), encoding="utf-8")

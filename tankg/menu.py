@@ -44,6 +44,7 @@ ICONS = {
     "code": "<path d=\"M16 18l6-6-6-6\"/><path d=\"M8 6l-6 6 6 6\"/>",
     "info": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 11v6M12 7.5v.5\"/>",
     "search": "<circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"M20 20l-3.5-3.5\"/>",
+    "setlist": "<path d=\"M4 6h10M4 12h10M4 18h6\"/><path d=\"M18 18V7l3-1\"/><circle cx=\"16\" cy=\"18\" r=\"2\"/>",
     "pedal": "<rect x=\"4\" y=\"3\" width=\"16\" height=\"18\" rx=\"3\"/><circle cx=\"12\" cy=\"15\" r=\"3\"/><path d=\"M8 7h8\"/>",
 }
 
@@ -65,6 +66,8 @@ MENU = [
         ("swap", "Intercambiar con otro slot…", "Cambia de lugar dos presets", "swap", "mover"),
         ("left", "Mover a la izquierda", "Lo cambia con el preset anterior", "left", ""),
         ("right", "Mover a la derecha", "Lo cambia con el preset siguiente", "right", ""),
+        ("setlist", "Setlists y modo escenario…", "Tus shows en orden, con notas, en pantalla grande", "setlist",
+         "show concierto ordenar orden canciones repertorio vivo escenario footswitch"),
         ("renameBank", "Renombrar banco…", "Nombre del banco actual", "rename", "nombre"),
         ("revert", "Revertir este preset", "Descarta sus cambios sin guardar", "revert", "deshacer"),
         ("revertAll", "Revertir todo", "Descarta todos los cambios sin guardar", "revert", "deshacer"),

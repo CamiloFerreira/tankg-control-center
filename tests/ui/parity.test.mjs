@@ -7,6 +7,7 @@ import { FIELDS } from "../../android/ui/js/data.js";
 import { SIG, TANH } from "../../android/ui/js/am4.js";
 import { packFile, parsePackFile, parsePresetFile, parseSetFile, presetFile, remapPack, setFile } from "../../android/ui/js/files.js";
 import { Bank, fromHex, toHex } from "../../android/ui/js/protocol.js";
+import * as setlist from "../../android/ui/js/setlist.js";
 
 const g = JSON.parse(readFileSync(process.argv[2], "utf8"));
 for (const c of g.designs) assert.equal(toHex(applyDesign(c.design, c.like ? fromHex(c.like) : null)), c.expect, JSON.stringify(c.design));
@@ -30,5 +31,17 @@ assert.equal(pk.amps.length, 1); assert.equal(pk.amps[0].slot, g.packAmp); asser
 assert.equal(remapPack([pk.presets[0].record], { [g.packAmp]: 8 })[0][5], 8);
 const jsPack = packFile(bank, [4, 5, 6, 7], { 4: "Uno ñ" }, { 2: "Banco" }, { [g.packAmp + 1]: "Mi AMP" }, { [g.packAmp]: pk.amps[0].data }, "Pack");
 assert.deepEqual(jsPack.missing, []);
+for (const c of g.setlist) {
+  assert.deepEqual(setlist.layout(c.order, c.start), c.source, "setlist layout");
+  assert.deepEqual(setlist.moveNames({ "6A": "Intro", "1B": "Cierre ñ" }, c.source), c.names, "setlist names");
+  const moved = setlist.apply(bank, c.source), names = setlist.moveNames(g.setlistNames, c.source);
+  assert.deepEqual(setlist.resolve(g.setlistSongs, moved, names), c.slots, "setlist resolve");
+  assert.deepEqual(setlist.refresh(g.setlistSongs, moved, names), c.songs, "setlist refresh");
+  assert.deepEqual(setlist.apply(bank, c.source).presets.map(toHex), c.source.map(s => toHex(bank.presets[s])));
+}
+assert.throws(() => setlist.layout([0, 1], 35));
+assert.equal(setlist.text("Show ", [...g.setlistSongs, { slot: "9D", raw: "", name: "", note: "" }], [3, 7, 0, null, null]), g.setlistText);
+assert.deepEqual(setlist.clean(g.setlistDirty), g.setlistClean);
+assert.deepEqual(setlist.song(bank, g.setlistNames, 4, "capo 2"), g.setlistSongs[0]);
 console.log(JSON.stringify({ preset: presetFile(fromHex(g.presetRaw), 5, g.presetName),
   set: setFile(bank, [4, 5, 6, 7], ["Uno", "", "Tres", "Cuatro"], "Mi banco"), pack: jsPack.text }));

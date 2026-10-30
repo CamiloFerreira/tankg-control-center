@@ -857,3 +857,50 @@ def test_amp_sources_and_preset_needs(tmp_path):
     doc = cloud.make_doc(bank, {}, {}, amps={"9": "Randall"}, amp_sources=a.amp_sources, preset_amps=a.preset_amps)
     assert cloud.doc_amp_sources(doc) == a.amp_sources and cloud.doc_preset_amps(doc) == a.preset_amps
     assert "ampSources" not in cloud.make_doc(bank, {}, {})["aliases"]   # older documents keep their key
+
+
+def test_setlist_layout_swaps_songs_into_place():
+    from tankg import setlist
+    from tankg.model import SLOTS, Bank
+    bank = Bank.from_bytes(LIVE)
+    order = [20, 3, 0, 35, 5]
+    source = setlist.layout(order, 2)
+    assert source[2:7] == order and sorted(source) == list(range(SLOTS))
+    moved = setlist.apply(bank, source)
+    assert [moved.presets[2 + i] for i in range(5)] == [bank.presets[s] for s in order]
+    assert sum(n != o for n, o in enumerate(source)) <= 2 * len(order)   # swaps: only the presets involved move
+    assert setlist.layout([0, 1, 2], 0) == list(range(SLOTS))
+    names = setlist.move_names({"6A": "Intro", "1A": "Cierre"}, source)
+    assert names[slot_name(source.index(20))] == "Intro" and names[slot_name(source.index(0))] == "Cierre"
+    songs = [{"slot": "1C", "raw": "", "name": "Uno", "note": "drop D "}, {"slot": "9D", "raw": "", "name": "", "note": ""}]
+    assert setlist.text("Bar ", songs, [2, None]) == "SETLIST · Bar\n\n 1. 1C  Uno  (drop D)\n 2. --  Preset 9D\n"
+    for bad in (([1, 1], 0), ([0], 36), ([0, 1], 35), ([40], 0)):
+        with pytest.raises(ValueError):
+            setlist.layout(*bad)
+
+
+def test_setlist_songs_find_their_presets_after_moving(tmp_path):
+    from tankg import cloud, setlist
+    bank = Bank.from_bytes(LIVE)
+    names = {"1A": "Intro", "3C": "Riff"}
+    songs = [setlist.song(bank, names, s, note) for s, note in ((8, "capo 2"), (10, ""), (0, ""))]
+    assert setlist.resolve(songs, bank, names) == [8, 10, 0]
+    source = setlist.layout([8, 10, 0], 20)                  # ordered: they move, bytes and names follow
+    moved, moved_names = setlist.apply(bank, source), setlist.move_names(names, source)
+    assert setlist.resolve(songs, moved, moved_names) == [20, 21, 22]
+    edited = moved.copy()
+    edited.presets[21].set("gain", (edited.presets[21].get("gain") + 1) % 128)   # still found by its name
+    assert setlist.resolve(songs, edited, moved_names)[1] == 21
+    assert setlist.refresh(songs, moved, moved_names)[0] == dict(songs[0], slot="6A")
+    gone = Bank([Preset(bytearray(21)) for _ in range(36)])
+    assert setlist.resolve(songs, gone, {}) == [None, None, None]
+    twins = Bank([bank.presets[8].copy() for _ in range(36)])  # same bytes everywhere: one slot per song
+    assert setlist.resolve([songs[0], songs[0]], twins, {}) == [8, 0]
+    assert setlist.clean([{"title": "", "songs": [{"slot": "6A", "raw": "00ff"}, {"slot": "77", "raw": "x"}, 5]}, 3]) == [
+        {"title": "Setlist", "songs": [{"slot": "6A", "raw": "00ff", "name": "", "note": ""}]}]
+    aliases = library.Aliases(tmp_path / "a.json")
+    aliases.setlists.append({"title": "Show", "songs": songs})
+    aliases.save()
+    assert library.Aliases(tmp_path / "a.json").setlists == [{"title": "Show", "songs": songs}]
+    doc = cloud.make_doc(bank, {}, {}, setlists=aliases.setlists)
+    assert cloud.doc_setlists(doc) == aliases.setlists and "setlists" not in cloud.make_doc(bank, {}, {})["aliases"]

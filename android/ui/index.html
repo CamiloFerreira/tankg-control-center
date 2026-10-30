@@ -18,6 +18,7 @@
     <button id="tbUndo" class="tb">Deshacer</button>
     <span class="tsep"></span>
     <button id="tbLib" class="tb accent">Biblioteca de sonidos</button>
+    <button id="tbSet" class="tb accent">Setlists</button>
   </nav>
   <span id="status" class="pill off">Desconectada</span>
   <button id="connect" class="btn primary small">Conectar</button>
@@ -37,19 +38,28 @@
 
 <main id="app">
   <section id="empty" class="empty">
-    <img class="empty-icon" src="img/icon.svg" alt="Tank-G Control Center">
-    <h1>Conecta tu pedalera</h1>
-    <p id="emptyHint"></p>
-    <button id="connectBig" class="btn primary">Conectar</button>
-    <button id="demoBig" class="btn">Probar en modo demo</button>
+    <div class="hero">
+      <img class="empty-icon" src="img/icon.svg" alt="">
+      <h1>Tank-G Control Center</h1>
+      <p class="lead">Tus presets, setlists y sonidos de bandas para la M-VAVE Tank-G.</p>
+    </div>
+    <div class="start">
+      <button id="connectBig" class="start-card primary" data-icon="plug"><span><b>Conectar la pedalera</b><small>USB-OTG o Bluetooth (Tank-G v2)</small></span></button>
+      <button id="demoBig" class="start-card" data-icon="demo"><span><b>Probar en modo demo</b><small>Con presets de ejemplo, sin pedalera</small></span></button>
+    </div>
     <p id="emptyError" class="error"></p>
+    <div class="features">
+      <span data-icon="library"><b>600 presets</b><small>de bandas y estilos</small></span>
+      <span data-icon="setlist"><b>Setlists</b><small>y modo escenario</small></span>
+      <span data-icon="ai"><b>Crear con IA</b><small>describe tu sonido</small></span>
+    </div>
+    <p id="emptyHint" class="hint"></p>
   </section>
 
   <section id="editor" hidden>
     <aside id="browser" class="browser" aria-label="Presets">
-      <div class="browser-head"><b>PRESETS</b><span class="legend">• sin guardar</span>
+      <div class="browser-head"><b>PRESETS</b><span class="legend">● sin guardar</span>
         <button id="browserClose" class="icon" aria-label="Cerrar">✕</button></div>
-      <div class="cols"><span>A</span><span>B</span><span>C</span><span>D</span></div>
       <div id="browserGrid"></div>
     </aside>
 
@@ -90,6 +100,7 @@
 <footer id="bottom" class="bottom" hidden>
   <button id="undo" class="btn">Deshacer</button>
   <button id="library" class="btn accent">Biblioteca</button>
+  <button id="setlists" class="btn accent">Setlists</button>
   <button id="save" class="btn primary">Guardar</button>
 </footer>
 
@@ -115,6 +126,30 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- setlists sheet (desktop SetlistDialog) and stage mode (StageWindow) -->
+<div id="setSheet" class="sheet" hidden>
+  <div class="sheet-head"><button class="icon" data-close aria-label="Cerrar">←</button><h2>Setlists</h2></div>
+  <div class="sheet-body">
+    <div class="set-row"><select id="setPick" aria-label="Setlist"></select><button id="setNew" class="btn">Nuevo</button><button id="setDel" class="btn">Borrar</button></div>
+    <input id="setTitle" class="search" placeholder="Nombre del show (p. ej. «Bar El Sótano, sábado»)">
+    <ol id="setSongs" class="setlist"></ol>
+    <p id="setInfo" class="muted"></p>
+    <button id="setStage" class="btn primary wide">▶ Modo escenario</button>
+    <h3 class="genre">AGREGAR CANCIONES · TOCA LOS PRESETS EN ORDEN</h3>
+    <div id="setPool" class="picker"></div>
+    <h3 class="genre">ORDENAR EN LA PEDALERA (OPCIONAL)</h3>
+    <p class="muted">Deja las canciones seguidas (1A, 1B, 1C, 1D, 2A…) para pasarlas con los footswitches. Solo se mueven los presets necesarios.</p>
+    <div class="set-row"><select id="setStart" aria-label="Primer slot"></select><button id="setOrder" class="btn">Ordenar</button></div>
+    <button id="setCopy" class="btn wide">Copiar la lista para imprimir o compartir</button>
+  </div>
+</div>
+<div id="stage" class="sheet stage" hidden>
+  <div class="stage-top"><span id="stTitle"></span><span id="stCount"></span><button class="btn" data-close>Salir</button></div>
+  <div id="stProg" class="stage-prog"><div></div></div>
+  <div id="stMain" class="stage-main"><div id="stSlot"></div><div id="stAmp"></div><div id="stName"></div><div id="stNote"></div><div id="stWarn"></div></div>
+  <div class="stage-bottom"><button id="stPrev" class="btn">◀</button><div class="stage-next"><small>SIGUE</small><div id="stNext"></div></div><button id="stFwd" class="btn primary">▶</button></div>
 </div>
 
 <!-- backups sheet -->

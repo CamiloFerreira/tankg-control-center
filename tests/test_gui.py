@@ -371,3 +371,55 @@ def test_factory_restore_names_presets_and_whole_banks(env):
     w._factory_names([0, 1, 2, 3, 4], "original")
     assert w.aliases.preset(0) == names["presets"]["1A"] and w.aliases.preset(4) == names["presets"]["2A"]
     assert w.aliases.bank(0) == names["banks"]["1"] and w.aliases.bank(1) == ""   # bank 2 only partly restored
+
+
+def test_setlists_saved_ordered_and_stage_mode(env):
+    w, pedal, wait, _ = env
+    w.aliases.set_preset(10, "Thunderstruck")
+    before = w.local.copy()
+    d = dialogs.SetlistDialog(w)
+    for s in (10, 0, 30):
+        d.pool.setCurrentRow(s)
+        d.add()
+    d.songs.setCurrentRow(2)
+    d.move(-1)                      # 30 before 0
+    d.songs.setCurrentRow(0)
+    d._note_edited("afinación drop D")
+    d.title.setText("Bar")
+    d._renamed("Bar")
+    d.start.setCurrentIndex(d.start.findData(4))
+    d.copy_text()
+    assert QtWidgets.QApplication.clipboard().text().splitlines()[2:] == [
+        " 1. 3C  Thunderstruck  (afinación drop D)", f" 2. 8C  {before.presets[30].amp_name}",
+        f" 3. 1A  {before.presets[0].amp_name}"]
+    assert library.Aliases(w.aliases.path).setlists[0]["title"] == "Bar"   # saved as it is edited
+    d.apply()
+    assert [w.local.presets[s] for s in (4, 5, 6)] == [before.presets[s] for s in (10, 30, 0)]
+    assert w.aliases.preset(4) == "Thunderstruck" and d.slots == [4, 5, 6]
+    assert [s["slot"] for s in w.aliases.setlists[0]["songs"]] == ["2A", "2B", "2C"]
+    d.new()
+    assert len(w.aliases.setlists) == 2 and d.songs.count() == 0
+    d.pick.setCurrentIndex(0)
+    assert d.songs.count() == 3
+    stage = dialogs.StageWindow(w, "Bar", d.current()["songs"], d.slots)
+    assert stage.name.text() == "Thunderstruck" and stage.note.text() == "afinación drop D" and w.current == 4
+    stage.go(1)
+    assert stage.slot.text() == "2B" and w.current == 5 and stage.up_next.text() == f"2C · {before.presets[0].amp_name}"
+    assert wait(lambda: b"\xc0\x05" in pedal.sent)   # Program Change: the pedal plays the song
+    stage.go(5)                     # past the end: stays
+    assert stage.pos == 1
+    stage.close()
+    w.undo()
+    assert w.local.to_bytes() == before.to_bytes() and w.aliases.preset(10) == "Thunderstruck"
+    assert len(w.aliases.setlists) == 2   # setlists are not editor changes
+
+
+def test_library_cards(env):
+    w, *_ = env
+    lib = dialogs.ArtistLibrary(w)
+    cards = [lib.list.item(i).data(dialogs.CARD_ROLE) for i in range(lib.list.count())]
+    assert cards[0] == {"header": "BÁSICOS"} and cards[1]["badge"] == "GE" and len(cards[1]["pips"]) == 4
+    assert lib.presets.count() == 4 and lib.presets.item(0).data(dialogs.CARD_ROLE)["badge"] == "A"
+    lib.presets.setCurrentRow(3)
+    assert lib.detail.text() == lib._bank().presets[3].summary()
+    assert [dialogs.initials(n) for n in ("Blind Guardian", "AC/DC", "★ Pantera", "")] == ["BG", "AC", "PA", "?"]

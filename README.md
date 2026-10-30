@@ -112,6 +112,17 @@ Tests: `.venv/bin/python -m pytest -q`. GitHub Actions los ejecuta en Linux y Wi
   al título (F2); clic en «BANCO n» para nombrar el banco (Shift+F2). Se guardan en
   `~/.local/share/tankg/aliases.json` (Windows: `%APPDATA%\tankg\aliases.json`), siguen al preset al intercambiar/duplicar y viajan
   dentro de los `.tgpreset`.
+- **Setlists y modo escenario** (botón «Setlists» junto a la Biblioteca o Ctrl+J; también en Android, en la barra de abajo): guarda todos los shows que
+  quieras («Bar sábado», «Ensayo», «Acústico»), con los presets en el orden en que los vas a tocar y
+  una nota por canción (afinación, capo, tempo…). Se sincronizan con Google Drive y cada canción
+  encuentra su preset aunque lo cambies de lugar.
+  - **Modo escenario**: pantalla completa con letras enormes (slot, canción, nota y la siguiente);
+    flechas, barra espaciadora, Re Pág/Av Pág (pedales pasa-páginas Bluetooth) o tocar la pantalla
+    pasan de canción y la activan en la pedalera. En Android la pantalla no se apaga mientras tanto.
+  - **Ordenar** (opcional): deja las canciones seguidas desde el slot que elijas (1A, 1B, 1C, 1D,
+    2A…) para pasarlas con los footswitches. Solo se intercambian los presets necesarios (los nombres
+    los siguen), se deshace con Ctrl+Z y «Guardar» lo pasa a la pedalera.
+  - «Copiar lista» da el setlist con el slot y la nota de cada canción, para imprimir o mandar a la banda.
 - **Biblioteca de sonidos** (barra o Ctrl+L), sin IA: más de 150 bancos y 600 presets. Cada banda
   es un banco con el mismo orden: **A Limpio** (Crunch si la banda casi no toca limpio), **B Rítmica**,
   **C Variante** (otra canción o época) y **D Solo**; el LED indica el tipo (cian, amarillo, rojo,

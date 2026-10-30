@@ -26,6 +26,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+from . import setlist
 from .cloud_config import CLIENT_ID, CLIENT_SECRET
 from .model import Bank
 
@@ -200,7 +201,7 @@ class Drive:
 # sync -------------------------------------------------------------------------------------------
 
 def make_doc(bank: Bank, presets: dict, banks: dict, device: str | None = None, amps: dict | None = None,
-             amp_sources: dict | None = None, preset_amps: dict | None = None) -> dict:
+             amp_sources: dict | None = None, preset_amps: dict | None = None, setlists: list | None = None) -> dict:
     aliases = {"presets": dict(presets), "banks": dict(banks)}
     if amps:
         aliases["amps"] = dict(amps)
@@ -208,6 +209,8 @@ def make_doc(bank: Bank, presets: dict, banks: dict, device: str | None = None, 
         aliases["ampSources"] = {k: dict(v) for k, v in amp_sources.items()}
     if preset_amps:   # the captured amp each pack preset was made for
         aliases["presetAmps"] = {k: dict(v) for k, v in preset_amps.items()}
+    if setlists:      # the saved shows (tankg/setlist.py)
+        aliases["setlists"] = setlist.clean(setlists)
     return {"format": FORMAT, "version": 1, "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "device": device or device_name(), "bank": bank.to_bytes().hex(), "aliases": aliases}
 
@@ -233,6 +236,10 @@ def doc_amps(doc: dict) -> dict:
 
 def doc_preset_amps(doc: dict) -> dict:
     return {k: dict(v) for k, v in ((doc.get("aliases") or {}).get("presetAmps") or {}).items()}
+
+
+def doc_setlists(doc: dict) -> list[dict]:
+    return setlist.clean((doc.get("aliases") or {}).get("setlists"))
 
 
 def doc_amp_sources(doc: dict) -> dict:

@@ -7,19 +7,20 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import (QByteArray, QEasingCurve, QObject, QPoint, QPropertyAnimation, QRectF, QRunnable, QSize,
+from PySide6.QtCore import (QByteArray, QEasingCurve, QObject, QPoint, QPropertyAnimation, QRect, QRectF, QRunnable, QSize,
                             Qt, QThreadPool, QTimer, QUrl, Signal)
-from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPixmap, QRadialGradient
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame, QGraphicsOpacityEffect,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
-    QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout, QWidget,
+    QSizePolicy, QStackedWidget, QStyle, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
-from . import ai, artists, chatapps, device, library, menu, pack
-from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, FIELDS, OFF_COLOR, REC_LEN, Bank, slot_name, zone_of
-from .theme import ERROR, OK, TEXT, TEXT_DIM
+from . import ai, artists, chatapps, device, library, menu, pack, setlist
+from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, FIELDS, OFF_COLOR, REC_LEN, SLOTS, Bank, slot_name, zone_of
+from .theme import ACCENT_HOVER, BORDER_2, ERROR, FIELD, OK, SURFACE_2, TEAL, TEXT, TEXT_DIM, WARN
 
 BYTE_NAMES = {f.offset: f.label for f in FIELDS}
 BYTE_NAMES.update({OFF_COLOR: "LED rojo", OFF_COLOR + 1: "LED verde", OFF_COLOR + 2: "LED azul"})
@@ -770,6 +771,8 @@ class ArtistLibrary(StyledDialog):
         self.search.textChanged.connect(self.populate)
         llay.addWidget(self.search)
         self.list = QListWidget()
+        self.list.setObjectName("cards")
+        self.list.setItemDelegate(CardDelegate(self.list, tall=True))
         self.list.currentRowChanged.connect(self._bank_changed)
         self.list.itemDoubleClicked.connect(lambda _: self.apply_bank())
         self.list.setToolTip("Doble clic: cargar los 4 presets en el banco elegido")
@@ -777,17 +780,19 @@ class ArtistLibrary(StyledDialog):
         cols.addWidget(left, 2)
 
         right, rlay = self._card("2", "Presets del banco")
-        self.preset_group = QButtonGroup(self)
-        self.preset_cards: list[QToolButton] = []
-        for i in range(4):
-            b = self.mode_card("")
-            b.setMinimumHeight(84)
-            b.setToolButtonStyle(Qt.ToolButtonTextOnly)
-            b.clicked.connect(self._update_buttons)
-            b.setStyleSheet("QToolButton#modeCard { text-align: left; }")
-            self.preset_group.addButton(b, i)
-            self.preset_cards.append(b)
-            rlay.addWidget(b)
+        self.presets = QListWidget()
+        self.presets.setObjectName("cards")
+        self.presets.setItemDelegate(CardDelegate(self.presets, tall=True))
+        self.presets.setSpacing(2)
+        self.presets.currentRowChanged.connect(lambda _: self._update_buttons())
+        self.presets.itemDoubleClicked.connect(lambda _: self.apply_one())
+        self.presets.setToolTip("Doble clic: aplicar al preset seleccionado")
+        self.presets.setMinimumHeight(4 * 66 + 12)
+        rlay.addWidget(self.presets, 1)
+        self.detail = QLabel()
+        self.detail.setObjectName("hint")
+        self.detail.setWordWrap(True)
+        rlay.addWidget(self.detail)
         dest = QHBoxLayout()
         dest.addWidget(QLabel("Cargar los 4 en:"))
         self.dest = QComboBox()
@@ -804,7 +809,6 @@ class ArtistLibrary(StyledDialog):
         if not self.upload.isEnabled():
             self.upload.setToolTip("Pedalera no conectada: los cambios quedan en el editor.")
         rlay.addWidget(self.upload)
-        rlay.addStretch()
         cols.addWidget(right, 3)
 
         self.button("Cerrar", self.reject)
@@ -831,10 +835,15 @@ class ArtistLibrary(StyledDialog):
                 continue
             head = QListWidgetItem(genre.upper())
             head.setFlags(Qt.NoItemFlags)
+            head.setData(CARD_ROLE, {"header": genre.upper()})
             self.list.addItem(head)
             self.banks.append(None)
             for b in banks:
-                self.list.addItem("   " + b.name)
+                item = QListWidgetItem(b.name)
+                item.setData(CARD_ROLE, {"badge": initials(b.name), "title": b.name, "color": led_color(b.presets[1].color),
+                                         "sub": " · ".join(p.role for p in b.presets), "sub_color": QColor(TEXT_DIM),
+                                         "pips": [led_color(p.color) for p in b.presets], "chip": AMP_MODELS[b.presets[1].amp]})
+                self.list.addItem(item)
                 self.banks.append(b)
         # band packs with captured amps (references to the M-VAVE community), after the factory-AMP banks
         packs = [p for _, p in pack.builtin() if not query or query in (
@@ -842,11 +851,16 @@ class ArtistLibrary(StyledDialog):
         if packs:
             head = QListWidgetItem("★ CON AMP IMPORTADO (comunidad M-VAVE)")
             head.setFlags(Qt.NoItemFlags)
+            head.setData(CARD_ROLE, {"header": "★ CON AMP IMPORTADO (COMUNIDAD M-VAVE)"})
             self.list.addItem(head)
             self.banks.append(None)
             for p in packs:
-                missing = " ⬇" if pack.missing([p]) else ""
-                self.list.addItem(f"   ★ {p.title}{missing}")
+                item = QListWidgetItem(f"★ {p.title}")
+                item.setData(CARD_ROLE, {"badge": "★", "title": p.title, "color": QColor(WARN),
+                                         "sub": "AMP: " + " · ".join(a.name for a in p.amps), "sub_color": QColor(TEXT_DIM),
+                                         "pips": [led_color(pr.color) for _, pr, _ in p.presets],
+                                         "chip": "⬇ descarga" if pack.missing([p]) else "AMP listo"})
+                self.list.addItem(item)
                 self.banks.append(p)
         self.list.blockSignals(False)
         first = next((i for i, b in enumerate(self.banks) if b is not None), -1)
@@ -859,23 +873,29 @@ class ArtistLibrary(StyledDialog):
 
     def _bank_changed(self, _row: int) -> None:
         bank = self._bank()
+        keep = max(0, self.presets.currentRow())
+        self.presets.blockSignals(True)
+        self.presets.clear()
         if isinstance(bank, pack.Pack):
             models = {a.slot: a for a in bank.amps}
-            for i, card in enumerate(self.preset_cards):
-                _, p, name = bank.presets[i]
+            for i, (_, p, name) in enumerate(bank.presets):
                 amp = models.get(p.amp)
-                card.setVisible(True)
-                card.setText(f"{'ABCD'[i]}   {name}\n" + (f"★ AMP importado: «{amp.name}» ({amp.credit_text()})" if amp
-                                                         else f"AMP de fábrica: {AMP_MODELS[p.amp]}"))
-            self._update_buttons()
-            return
-        for i, card in enumerate(self.preset_cards):
-            card.setVisible(bank is not None)
-            if bank is not None:
-                p = bank.presets[i]
-                card.setText(f"{'ABCD'[i]} · {p.role.upper()}   {p.name}\n{p.desc}\n{p.summary()}")
-        if bank is not None and self.preset_group.checkedId() < 0:
-            self.preset_cards[0].setChecked(True)
+                item = QListWidgetItem(name or f"Preset {'ABCD'[i]}")
+                item.setToolTip(f"AMP importado: «{amp.name}» ({amp.credit_text()})" if amp else f"AMP de fábrica: {p.amp_name}")
+                item.setData(CARD_ROLE, {"badge": "ABCD"[i], "title": name or f"Preset {'ABCD'[i]}", "color": led_color(p.color),
+                                         "sub": f"★ {amp.name}" if amp else f"AMP de fábrica · {p.cab_name}",
+                                         "chip": p.amp_name if not amp else "AMP importado"})
+                self.presets.addItem(item)
+        elif bank is not None:
+            for i, p in enumerate(bank.presets):
+                item = QListWidgetItem(p.name)
+                item.setToolTip(p.summary())
+                item.setData(CARD_ROLE, {"badge": "ABCD"[i], "title": f"{p.role.upper()} · {p.name}", "color": led_color(p.color),
+                                         "sub": p.desc, "sub_color": QColor(TEXT_DIM), "chip": AMP_MODELS[p.amp]})
+                self.presets.addItem(item)
+        self.presets.blockSignals(False)
+        if self.presets.count():
+            self.presets.setCurrentRow(min(keep, self.presets.count() - 1))
         self._update_buttons()
 
     def _update_buttons(self) -> None:
@@ -888,12 +908,14 @@ class ArtistLibrary(StyledDialog):
         if isinstance(bank, pack.Pack):
             self.bank_btn.setText(f"Importar con sus AMP en banco {dest}…" + (" (descarga)" if pack.missing([bank]) else ""))
         self.target.setText(f"Seleccionado: {slot_name(self.main.current)}")
+        row = self.presets.currentRow()
+        self.detail.setText(self.presets.item(row).toolTip() if row >= 0 else "")
 
     def apply_one(self) -> None:
         bank = self._bank()
-        if bank is None:
+        if bank is None or isinstance(bank, pack.Pack):   # packs go in whole, with their AMP models
             return
-        p = bank.presets[max(0, self.preset_group.checkedId())]
+        p = bank.presets[max(0, self.presets.currentRow())]
         like = self.main.local.presets[self.main.current]
         self.main.apply_presets(self.main.current, [(p.build(like), p.name)], upload=self.upload.isChecked(),
                                 what=f"«{p.name}»")
@@ -1003,6 +1025,554 @@ class BackupManager(StyledDialog):
     def open_folder(self) -> None:
         library.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(library.BACKUP_DIR)))
+
+
+CARD_ROLE = Qt.UserRole + 1   # {"badge", "title", "sub", "chip", "color", "pips", "lost"} or {"header"}: CardDelegate
+
+
+def initials(name: str) -> str:
+    """Two letters for a band's circle: «Blind Guardian» -> BG, «AC/DC» -> AC (same as initials() in app.js)."""
+    words = [w for w in name.replace("★", "").split() if w[:1].isalnum()]
+    return ("".join(w[0] for w in words[:2]) if len(words) > 1 else (words[0][:2] if words else "?")).upper()
+
+
+def scaled_font(base: QFont, factor: float, bold: bool = False) -> QFont:
+    """`base` resized by `factor`, whether its size is in points or (from a stylesheet) in pixels."""
+    f = QFont(base)
+    if base.pointSizeF() > 0:
+        f.setPointSizeF(base.pointSizeF() * factor)
+    else:
+        f.setPixelSize(max(6, round(base.pixelSize() * factor)))
+    f.setBold(bold)
+    return f
+
+
+def led_color(rgb: tuple[int, int, int]) -> QColor:
+    """A preset's footswitch colour for the interface; too dark to see (LED off) = the accent."""
+    return QColor(*rgb) if sum(rgb) > 90 else QColor(ACCENT_HOVER)
+
+
+class CardDelegate(QStyledItemDelegate):
+    """List rows drawn as cards: a circle in the preset's LED colour with its slot (or a band's
+    initials), the name, an optional second line (song note, description) after small colour dots,
+    and a chip (the AMP model); {"header": text} rows are group titles. Setlist and library lists."""
+
+    def __init__(self, parent, tall: bool):
+        super().__init__(parent)
+        self.tall = tall
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802 - Qt API
+        if (index.data(CARD_ROLE) or {}).get("header"):
+            return QSize(0, 32)
+        return QSize(0, 58 if self.tall else 42)
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        card = index.data(CARD_ROLE) or {}
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        if card.get("header"):
+            font = scaled_font(option.font, 0.82, True)
+            font.setLetterSpacing(QFont.AbsoluteSpacing, 1.2)
+            painter.setFont(font)
+            painter.setPen(QColor(TEXT_DIM))
+            painter.drawText(option.rect.adjusted(8, 0, -8, -4), Qt.AlignLeft | Qt.AlignBottom, card["header"])
+            painter.restore()
+            return
+        r = option.rect.adjusted(3, 3, -3, -3)
+        selected = bool(option.state & QStyle.State_Selected)
+        painter.setPen(QColor(ACCENT_HOVER) if selected else QColor(BORDER_2))
+        painter.setBrush(QColor(TEAL) if selected else QColor(SURFACE_2))
+        painter.drawRoundedRect(r, 9, 9)
+        color = QColor(ERROR) if card.get("lost") else card.get("color", QColor(ACCENT_HOVER))
+        d = r.height() - 12
+        circle = QRectF(r.left() + 8, r.top() + 6, d, d)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(color)
+        painter.drawEllipse(circle)
+        painter.setFont(scaled_font(option.font, 0.95 if self.tall else 0.8, True))
+        painter.setPen(QColor("#10161a") if color.lightness() > 120 else QColor("#ffffff"))
+        painter.drawText(circle, Qt.AlignCenter, card.get("badge", ""))
+        left = int(circle.right()) + 12
+        chip = card.get("chip", "")
+        chip_w = 0
+        if chip:
+            painter.setFont(scaled_font(option.font, 0.8))
+            chip_w = painter.fontMetrics().horizontalAdvance(chip) + 16
+            chip_r = QRectF(r.right() - chip_w - 8, r.center().y() - 11, chip_w, 22)
+            painter.setBrush(QColor(FIELD))
+            painter.drawRoundedRect(chip_r, 11, 11)
+            painter.setPen(QColor(TEXT_DIM))
+            painter.drawText(chip_r, Qt.AlignCenter, chip)
+        width = r.right() - left - chip_w - 16
+        painter.setFont(scaled_font(option.font, 1.08 if self.tall else 1.0, True))
+        painter.setPen(QColor(TEXT))
+        sub = card.get("sub", "")
+        top = QRect(left, r.top() + 7, width, r.height() // 2 - 5) if sub else QRect(left, r.top(), width, r.height())
+        painter.drawText(top, Qt.AlignLeft | (Qt.AlignBottom if sub else Qt.AlignVCenter),
+                         painter.fontMetrics().elidedText(card.get("title", ""), Qt.ElideRight, width))
+        if sub:
+            painter.setFont(scaled_font(option.font, 0.88))
+            x = left
+            for c in card.get("pips", []):   # the LED colours of a bank's four presets
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(c)
+                painter.drawEllipse(QRectF(x, r.center().y() + 5, 9, 9))
+                x += 12
+            x += 4 if card.get("pips") else 0
+            painter.setPen(QColor(ERROR) if card.get("lost") else card.get("sub_color", QColor(WARN)))
+            painter.drawText(QRect(x, r.center().y() + 2, width - (x - left), r.height() // 2 - 6), Qt.AlignLeft | Qt.AlignTop,
+                             painter.fontMetrics().elidedText(sub, Qt.ElideRight, width - (x - left)))
+        painter.restore()
+
+
+class SetlistDialog(StyledDialog):
+    """Saved setlists (tankg/setlist.py, in Aliases.setlists and the cloud): songs with notes, stage
+    mode, and optionally the songs put in footswitch order; same as the APK setlist sheet."""
+
+    def __init__(self, main):
+        super().__init__(main, "Setlists", "Arma tus shows con los presets en el orden en que los vas a tocar y "
+                         "una nota por canción. «Modo escenario» los muestra en grande y cambia el preset con las "
+                         "flechas o la barra espaciadora; «Ordenar» los deja seguidos en la pedalera (1A, 1B, 1C, "
+                         "1D, 2A…) para pasarlos con los footswitches.", 900, 720)
+        self.lists = main.aliases.setlists
+        if not self.lists:
+            self.lists.append({"title": "Mi show", "songs": []})
+        self.index = 0
+        _, lay = self.card("1", "Setlist")
+        row = QHBoxLayout()
+        self.pick = QComboBox()
+        self.pick.setMinimumWidth(260)
+        self.pick.currentIndexChanged.connect(self._picked)
+        self.title = QLineEdit()
+        self.title.setPlaceholderText("Nombre del show (p. ej. «Bar El Sótano, sábado»)")
+        self.title.textEdited.connect(self._renamed)
+        row.addWidget(self.pick)
+        row.addWidget(self.title, 1)
+        for text, fn in (("Nuevo", self.new), ("Borrar", self.delete)):
+            row.addWidget(self._small(text, fn))
+        lay.addLayout(row)
+        _, lay = self.card("2", "Canciones, en orden", stretch=1)
+        row = QHBoxLayout()
+        self.pool = QListWidget()
+        self.pool.itemDoubleClicked.connect(lambda _: self.add())
+        self.songs = QListWidget()
+        self.songs.setDragDropMode(QAbstractItemView.InternalMove)
+        self.songs.itemDoubleClicked.connect(lambda _: self.remove())
+        self.songs.model().rowsMoved.connect(lambda *_: self._reordered())
+        self.songs.currentRowChanged.connect(self._song_selected)
+        buttons = QVBoxLayout()
+        buttons.addStretch()
+        for text, fn in (("Agregar →", self.add), ("← Quitar", self.remove), ("Subir ↑", lambda: self.move(-1)),
+                         ("Bajar ↓", lambda: self.move(1))):
+            buttons.addWidget(self._small(text, fn))
+        buttons.addStretch()
+        for title, widget in (("Presets del editor", self.pool), (None, buttons), ("Orden del show (arrastra para mover)", self.songs)):
+            if title is None:
+                row.addLayout(widget)
+                continue
+            col = QVBoxLayout()
+            label = QLabel(title)
+            label.setObjectName("hint")
+            col.addWidget(label)
+            col.addWidget(widget, 1)
+            row.addLayout(col, 1)
+        lay.addLayout(row, 1)
+        self.note = QLineEdit()
+        self.note.setPlaceholderText("Nota de la canción seleccionada: afinación, capo, tempo, «entra con fade»…")
+        self.note.textEdited.connect(self._note_edited)
+        lay.addWidget(self.note)
+        _, lay = self.card("3", "Ordenar en la pedalera (opcional)")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Desde el slot:"))
+        self.start = QComboBox()
+        self.start.currentIndexChanged.connect(lambda _: self.update_info())
+        row.addWidget(self.start)
+        row.addStretch()
+        self.order_btn = self._small("Ordenar en el editor", self.apply)
+        row.addWidget(self.order_btn)
+        lay.addLayout(row)
+        self.info = QLabel()
+        self.info.setObjectName("hint")
+        self.info.setWordWrap(True)
+        lay.addWidget(self.info)
+        self.button("Copiar lista", self.copy_text, "link", left=True)
+        self.button("Cerrar", self.accept)
+        self.stage_btn = self.button("▶  Modo escenario", self.stage, "primary")
+        self.pool.setItemDelegate(CardDelegate(self.pool, tall=False))
+        self.songs.setItemDelegate(CardDelegate(self.songs, tall=True))
+        for w in (self.pool, self.songs):
+            w.setObjectName("cards")
+            w.setSpacing(1)
+        for s in range(SLOTS):
+            item = QListWidgetItem(self.label(s))
+            item.setData(Qt.UserRole, s)
+            self.pool.addItem(item)
+        self._fill_picker()
+
+    def _small(self, text: str, fn) -> QPushButton:
+        b = QPushButton(text)
+        b.setObjectName("secondary")
+        b.setCursor(Qt.PointingHandCursor)
+        b.clicked.connect(fn)
+        return b
+
+    def label(self, s: int) -> str:
+        return f"{slot_name(s)} · {self.main.aliases.preset(s) or self.main.local.presets[s].amp_name}"
+
+    def _pool_card(self, s: int) -> dict:
+        p = self.main.local.presets[s]
+        return {"badge": slot_name(s), "title": self.main.aliases.preset(s) or p.amp_name,
+                "chip": self.main.aliases.amp(p.amp) or p.amp_name, "color": led_color(p.color)}
+
+    def _song_card(self, i: int) -> dict:
+        s, slot = self.current()["songs"][i], self.slots[i]
+        if slot is None:
+            return {"badge": "⚠", "title": f"{i + 1}. {setlist.label(s)}", "sub": "Su preset ya no está en el editor",
+                    "lost": True}
+        p = self.main.local.presets[slot]
+        return {"badge": slot_name(slot), "title": f"{i + 1}. {setlist.label(s)}", "sub": s.get("note", "").strip(),
+                "chip": self.main.aliases.amp(p.amp) or p.amp_name, "color": led_color(p.color)}
+
+    # the saved setlists ----------------------------------------------------------------
+
+    def current(self) -> dict:
+        return self.lists[self.index]
+
+    def _fill_picker(self) -> None:
+        self.pick.blockSignals(True)
+        self.pick.clear()
+        for sl in self.lists:
+            self.pick.addItem(f"{sl['title']}  ({len(sl['songs'])})")
+        self.pick.setCurrentIndex(self.index)
+        self.pick.blockSignals(False)
+        self._load()
+
+    def _picked(self, i: int) -> None:
+        if 0 <= i < len(self.lists):
+            self.index = i
+            self._load()
+
+    def _renamed(self, text: str) -> None:
+        self.current()["title"] = text.strip() or "Setlist"
+        self.pick.setItemText(self.index, f"{self.current()['title']}  ({len(self.current()['songs'])})")
+        self._store()
+
+    def new(self) -> None:
+        self.lists.append({"title": f"Show {len(self.lists) + 1}", "songs": []})
+        self.index = len(self.lists) - 1
+        self._store()
+        self._fill_picker()
+        self.title.setFocus()
+        self.title.selectAll()
+
+    def delete(self) -> None:
+        sl = self.current()
+        if sl["songs"] and not ask(self, "Borrar setlist", f"¿Borrar «{sl['title']}»? Los presets no se tocan."):
+            return
+        del self.lists[self.index]
+        if not self.lists:
+            self.lists.append({"title": "Mi show", "songs": []})
+        self.index = min(self.index, len(self.lists) - 1)
+        self._store()
+        self._fill_picker()
+
+    def _store(self) -> None:
+        self.main.aliases.save()
+        self.main._schedule_cloud()
+
+    # songs -----------------------------------------------------------------------------
+
+    def _load(self) -> None:
+        """Shows the current setlist, with each song pointing to where its preset is now."""
+        sl = self.current()
+        sl["songs"] = setlist.refresh(sl["songs"], self.main.local, self.main.aliases.presets)
+        self.title.setText(sl["title"])
+        self.slots = setlist.resolve(sl["songs"], self.main.local, self.main.aliases.presets)
+        row = self.songs.currentRow()
+        self.songs.blockSignals(True)
+        self.songs.clear()
+        for i, (s, slot) in enumerate(zip(sl["songs"], self.slots)):
+            note = s.get("note", "").strip()
+            where = slot_name(slot) if slot is not None else "⚠ ya no está"
+            item = QListWidgetItem(f"{i + 1}. {where}  ·  {setlist.label(s)}" + (f"   — {note}" if note else ""))
+            item.setData(Qt.UserRole, i)
+            item.setData(CARD_ROLE, self._song_card(i))
+            self.songs.addItem(item)
+        self.songs.blockSignals(False)
+        self.songs.setCurrentRow(min(max(row, 0), self.songs.count() - 1))
+        for r in range(self.pool.count()):
+            self.pool.item(r).setText(self.label(r))
+            self.pool.item(r).setData(CARD_ROLE, self._pool_card(r))
+            self.pool.item(r).setHidden(r in self.slots)
+        self._song_selected(self.songs.currentRow())
+        self.pick.setItemText(self.index, f"{sl['title']}  ({len(sl['songs'])})")
+        self._fill_starts()
+
+    def _fill_starts(self) -> None:
+        keep = self.start.currentData()
+        n = max(1, len(self.current()["songs"]))
+        self.start.blockSignals(True)
+        self.start.clear()
+        for s in range(SLOTS - n + 1):
+            self.start.addItem(f"{slot_name(s)} (banco {s // 4 + 1})", s)
+        self.start.setCurrentIndex(max(0, min(keep or 0, self.start.count() - 1)))
+        self.start.blockSignals(False)
+        self.update_info()
+
+    def _song_selected(self, row: int) -> None:
+        songs = self.current()["songs"]
+        self.note.setEnabled(0 <= row < len(songs))
+        self.note.setText(songs[row].get("note", "") if 0 <= row < len(songs) else "")
+
+    def _note_edited(self, text: str) -> None:
+        row = self.songs.currentRow()
+        if 0 <= row < len(self.current()["songs"]):
+            self.current()["songs"][row]["note"] = text
+            self._store()
+            note = text.strip()
+            s, slot = self.current()["songs"][row], self.slots[row]
+            self.songs.item(row).setText(f"{row + 1}. {slot_name(slot) if slot is not None else '⚠ ya no está'}  ·  "
+                                         f"{setlist.label(s)}" + (f"   — {note}" if note else ""))
+            self.songs.item(row).setData(CARD_ROLE, self._song_card(row))
+
+    def add(self) -> None:
+        item = self.pool.currentItem()
+        if item is None or item.isHidden():
+            return
+        s = item.data(Qt.UserRole)
+        self.current()["songs"].append(setlist.song(self.main.local, self.main.aliases.presets, s))
+        row = self.pool.currentRow()
+        nxt = next((r for r in range(row + 1, self.pool.count()) if not self.pool.item(r).isHidden()), None)
+        self._store()
+        self._load()
+        self.songs.setCurrentRow(self.songs.count() - 1)
+        if nxt is not None:
+            self.pool.setCurrentRow(nxt)
+
+    def remove(self) -> None:
+        row = self.songs.currentRow()
+        if 0 <= row < len(self.current()["songs"]):
+            del self.current()["songs"][row]
+            self._store()
+            self._load()
+
+    def move(self, delta: int) -> None:
+        row, songs = self.songs.currentRow(), self.current()["songs"]
+        if row >= 0 and 0 <= row + delta < len(songs):
+            songs[row], songs[row + delta] = songs[row + delta], songs[row]
+            self._store()
+            self.songs.setCurrentRow(row + delta)
+            self._load()
+
+    def _reordered(self) -> None:
+        """Drag and drop: the list widget moved its items; put the songs in the same order."""
+        songs = self.current()["songs"]
+        order = [self.songs.item(i).data(Qt.UserRole) for i in range(self.songs.count())]
+        self.current()["songs"] = [songs[i] for i in order]
+        self._store()
+        self._load()
+
+    def update_info(self) -> None:
+        songs, start = self.current()["songs"], self.start.currentData() or 0
+        lost = self.slots.count(None)
+        self.order_btn.setEnabled(bool(songs) and not lost)
+        self.stage_btn.setEnabled(bool(songs))
+        if not songs:
+            self.status(self.info, "Agrega canciones con doble clic o «Agregar →».")
+        elif lost:
+            self.status(self.info, f"{lost} canción(es) ya no tienen su preset en el editor (⚠): quítalas o vuelve a "
+                                   "agregarlas para poder ordenar.", False)
+        else:
+            moved = sum(1 for new, old in enumerate(setlist.layout(self.slots, start)) if new != old)
+            self.status(self.info, f"{len(songs)} canciones de {slot_name(start)} a {slot_name(start + len(songs) - 1)}. "
+                        + (f"Cambian de lugar {moved} presets; deshacer (Ctrl+Z) lo vuelve atrás." if moved
+                           else "Ya están en ese orden: no se mueve nada."), True)
+
+    def copy_text(self) -> None:
+        QApplication.clipboard().setText(setlist.text(self.current()["title"], self.current()["songs"], self.slots))
+        self.status(self.info, "Lista copiada: pégala en un mensaje o imprímela.", True)
+
+    def apply(self) -> None:
+        start = self.start.currentData() or 0
+        self.main.apply_setlist(list(self.slots), start)
+        self._store()
+        self._load()
+        self.status(self.info, f"Ordenado de {slot_name(start)} a {slot_name(start + len(self.slots) - 1)}. "
+                               "«Guardar cambios» lo pasa a la pedalera.", True)
+
+    def stage(self) -> None:
+        if self.current()["songs"]:
+            StageWindow(self.main, self.current()["title"], self.current()["songs"], self.slots,
+                        max(0, self.songs.currentRow())).exec()
+
+
+class StageWindow(QDialog):
+    """Stage mode: the current song in big letters over a glow in its preset's LED colour, its slot
+    and note, the show's progress and the next song; the arrows, space, Page Up/Down (page turner
+    pedals) or the buttons move through the show and activate each preset on the pedal when it is
+    connected."""
+
+    def __init__(self, main, title: str, songs: list[dict], slots: list[int | None], first: int = 0):
+        super().__init__(main)
+        self.main, self.songs, self.slots = main, songs, slots
+        self.glow = QColor(ACCENT_HOVER)
+        self.setObjectName("stage")
+        self.setWindowTitle(f"Escenario · {title}")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(40, 24, 40, 28)
+        top = QHBoxLayout()
+        self.show_title = QLabel(f"SETLIST · {title}")
+        self.show_title.setObjectName("stageDim")
+        self.count = QLabel()
+        self.count.setObjectName("stageDim")
+        close = QPushButton("Salir (Esc)")
+        close.setObjectName("secondary")
+        close.clicked.connect(self.accept)
+        top.addWidget(self.show_title)
+        top.addStretch()
+        top.addWidget(self.count)
+        top.addSpacing(16)
+        top.addWidget(close)
+        lay.addLayout(top)
+        self.progress = QProgressBar()
+        self.progress.setObjectName("stageProgress")
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(6)
+        lay.addWidget(self.progress)
+        lay.addStretch(1)
+        self.center = QWidget()
+        center = QVBoxLayout(self.center)
+        center.setSpacing(6)
+        self.slot = QLabel()
+        self.slot.setObjectName("stageSlot")
+        self.amp = QLabel()
+        self.amp.setObjectName("stageAmp")
+        self.name = QLabel()
+        self.name.setObjectName("stageName")
+        self.name.setWordWrap(True)
+        self.note = QLabel()
+        self.note.setObjectName("stageNote")
+        self.note.setWordWrap(True)
+        self.warn = QLabel()
+        self.warn.setObjectName("stageWarn")
+        for w in (self.slot, self.amp, self.name, self.note, self.warn):
+            w.setAlignment(Qt.AlignCenter)
+            center.addWidget(w)
+        self.fade = QGraphicsOpacityEffect(self.center)
+        self.center.setGraphicsEffect(self.fade)
+        self.anim = QPropertyAnimation(self.fade, b"opacity", self)
+        self.anim.setDuration(260)
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        lay.addWidget(self.center)
+        lay.addStretch(1)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(16)
+        self.prev = QPushButton("◀  Anterior")
+        self.next = QPushButton("Siguiente  ▶")
+        card = QFrame()
+        card.setObjectName("stageNextCard")
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(18, 10, 18, 10)
+        inner.setSpacing(0)
+        caption = QLabel("SIGUE")
+        caption.setObjectName("stageCaption")
+        self.up_next = QLabel()
+        self.up_next.setObjectName("stageNext")
+        for w in (caption, self.up_next):
+            w.setAlignment(Qt.AlignCenter)
+            inner.addWidget(w)
+        for b, d in ((self.prev, -1), (self.next, 1)):
+            b.setObjectName("stageButton")
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.clicked.connect(lambda _=False, d=d: self.go(self.pos + d))
+        self.next.setProperty("primary", True)
+        close.setFocusPolicy(Qt.NoFocus)
+        bottom.addWidget(self.prev)
+        bottom.addWidget(card, 1)
+        bottom.addWidget(self.next)
+        lay.addLayout(bottom)
+        self.progress.setRange(0, len(songs))
+        self.pending: int | None = None   # slot to activate once the pedal is free (fast steps never get lost)
+        self.retry = QTimer(self)
+        self.retry.setSingleShot(True)
+        self.retry.setInterval(120)
+        self.retry.timeout.connect(self._activate)
+        self.pos = -1
+        self.go(first)
+        self.showFullScreen()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
+        """Dark stage with a soft glow in the current preset's LED colour behind the song."""
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#0b0e11"))
+        g = QRadialGradient(self.rect().center(), max(self.width(), self.height()) * 0.6)
+        inner, outer = QColor(self.glow), QColor(self.glow)
+        inner.setAlpha(70)
+        outer.setAlpha(0)
+        g.setColorAt(0, inner)
+        g.setColorAt(1, outer)
+        painter.fillRect(self.rect(), g)
+
+    def go(self, i: int) -> None:
+        if not 0 <= i < len(self.songs) or i == self.pos:
+            return
+        self.pos = i
+        s, slot = self.songs[i], self.slots[i]
+        self.count.setText(f"{i + 1} / {len(self.songs)}")
+        self.progress.setValue(i + 1)
+        self.slot.setText(slot_name(slot) if slot is not None else "—")
+        self.name.setText(setlist.label(s))
+        self.note.setText(s.get("note", "").strip())
+        self.warn.setText("")
+        self.amp.setText("")
+        if slot is None:
+            self.glow = QColor(ERROR)
+            self.warn.setText("Este preset ya no está en el editor.")
+        else:
+            p = self.main.local.presets[slot]
+            self.glow = led_color(p.color)
+            self.amp.setText(f"{self.main.aliases.amp(p.amp) or p.amp_name}  ·  {p.cab_name}")
+            self.main.select_slot(slot)
+            if not self.main.connected:
+                self.warn.setText("Pedalera no conectada: solo se muestra.")
+            elif slot in self.main.modified_slots():
+                self.warn.setText("Cambios sin guardar: suena la versión de la pedalera.")
+            if self.main.connected:
+                self.pending = slot
+                self._activate()
+        self.slot.setStyleSheet(f"color: {self.glow.lighter(115).name()};")   # the slot in the LED colour
+        nxt = self.songs[i + 1] if i + 1 < len(self.songs) else None
+        nslot = self.slots[i + 1] if nxt else None
+        self.up_next.setText(f"{slot_name(nslot) if nslot is not None else '—'} · {setlist.label(nxt)}" if nxt
+                             else "Fin del show")
+        self.prev.setEnabled(i > 0)
+        self.next.setEnabled(i + 1 < len(self.songs))
+        self.anim.stop()
+        self.anim.start()
+        self.update()
+
+    def _activate(self) -> None:
+        if self.pending is None:
+            return
+        if self.main.busy:   # the previous song is still being selected
+            self.retry.start()
+            return
+        self.main.current, self.pending = self.pending, None
+        self.main.activate_selected(quiet=True)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API
+        k = event.key()
+        if k in (Qt.Key_Right, Qt.Key_Down, Qt.Key_Space, Qt.Key_PageDown, Qt.Key_Return, Qt.Key_Enter):
+            self.go(self.pos + 1)
+        elif k in (Qt.Key_Left, Qt.Key_Up, Qt.Key_PageUp, Qt.Key_Backspace):
+            self.go(self.pos - 1)
+        elif k == Qt.Key_Home:
+            self.go(0)
+        else:
+            super().keyPressEvent(event)
 
 
 class CalibrationWizard(StyledDialog):

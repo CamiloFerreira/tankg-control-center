@@ -10,6 +10,7 @@ import { PACK_EXTENSION, communityKey, communityUrl, creditText, fromBase64, pac
   parseSetFile, presetFile, remapPack, setFile, stamp, toBase64 } from "./files.js";
 import * as cloud from "./cloud.js";
 import * as am4 from "./am4.js";
+import * as setlist from "./setlist.js";
 
 const $ = id => document.getElementById(id);
 const F = Object.fromEntries(FIELDS.map(f => [f.key, f]));
@@ -36,8 +37,8 @@ const store = {
   set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ } },
 };
 const aliasKey = () => (S.demo ? "tankg.aliases.demo" : "tankg.aliases");
-let aliases = { presets: {}, banks: {}, amps: {}, ampSources: {} };
-const loadAliases = () => { aliases = { presets: {}, banks: {}, amps: {}, ampSources: {}, ...store.get(aliasKey(), {}) }; };
+let aliases = { presets: {}, banks: {}, amps: {}, ampSources: {}, setlists: [] };
+const loadAliases = () => { aliases = { presets: {}, banks: {}, amps: {}, ampSources: {}, setlists: [], ...store.get(aliasKey(), {}) }; };
 /** Name of the model uploaded to a TYPE slot and, if it came from the M-VAVE community, where from (set_amp in library.py). */
 function setAmp(slot, name, source = null) {
   aliases.amps = { ...(aliases.amps || {}), [String(slot + 1)]: name };
@@ -65,6 +66,23 @@ const get = (key, s = S.current) => S.local.presets[s][F[key].offset];
 const zoneOf = (f, v) => (f.zones.length ? f.zones[Math.min(2, Math.floor((v * 3) / (f.max + 1)))] : "");
 const ampName = p => AMP_MODELS[p[F.amp_type.offset]] ?? "?";
 const rgbHex = p => "#" + toHex(p.slice(18, 21));
+/** A preset's footswitch colour for the interface; too dark to see (LED off) = the accent (dialogs.led_color). */
+const ledColor = p => (p[18] + p[19] + p[20] > 90 ? rgbHex(p) : "#23b37d");
+/** Two letters for a band's circle: «Blind Guardian» -> BG, «AC/DC» -> AC (same as dialogs.initials). */
+function initials(name) {
+  const words = name.replace("★", "").split(/\s+/).filter(w => /^[\p{L}\p{N}]/u.test(w));
+  return (words.length > 1 ? words.slice(0, 2).map(w => w[0]).join("") : (words[0] || "?").slice(0, 2)).toUpperCase();
+}
+/** A library / setlist card: circle (LED colour + text), title, optional colour pips and second line, chip. */
+function cardHtml({ badge, color, title, sub = "", pips = [], chip = "" }) {
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const ink = c => { const [r, g, b] = c.slice(1).match(/../g).map(h => parseInt(h, 16)); return (Math.max(r, g, b) + Math.min(r, g, b)) / 2 > 120 ? "#10161a" : "#fff"; };
+  return `<b class="dot" style="background:${color};color:${ink(color)}">${esc(badge)}</b><span class="ctext"><em>${esc(title)}</em>`
+    + `<small>${pips.map(c => `<i class="pip" style="background:${c}"></i>`).join("")}<i>${esc(sub)}</i></small></span>`
+    + (chip ? `<u class="chip">${esc(chip)}</u>` : "");
+}
+const ledOf = hex => ledColor(fromHex(hex));
+const lightColor = p => { const [r, g, b] = p[18] + p[19] + p[20] > 90 ? p.slice(18, 21) : [0x23, 0xb3, 0x7d]; return (Math.max(r, g, b) + Math.min(r, g, b)) / 2 > 120; };
 
 /** The captured amp a pack preset needs when its TYPE now holds something else (Aliases.missing_amp). */
 function missingAmp(s) {
@@ -190,12 +208,12 @@ function render() {
   const st = $("status");
   st.textContent = S.demo ? "Demo" : connected ? (S.dev.bluetooth ? "Conectada · Bluetooth" : "Conectada") : "Desconectada";
   st.className = "pill " + (S.demo ? "demo" : connected ? "on" : "off");
-  $("connect").hidden = connected;
   const has = !!S.local;
+  $("connect").hidden = connected || !has;   // the start screen has its own big «Conectar»
   $("empty").hidden = has;
   $("editor").hidden = !has;
   $("bottom").hidden = !has;
-  for (const id of ["tbRead", "tbSave", "tbUndo", "tbLib"]) $(id).disabled = !has;
+  for (const id of ["tbRead", "tbSave", "tbUndo", "tbLib", "tbSet", "setlists"]) $(id).disabled = !has;
   if (!has) return;
 
   const mod = new Set(modified());
@@ -257,8 +275,8 @@ function updateActions(mod = new Set(modified())) {
   const connected = !!S.dev, n = mod.size;
   $("undo").disabled = $("tbUndo").disabled = !S.undo.length;
   $("save").disabled = $("tbSave").disabled = !n || !connected;
-  $("save").textContent = n ? `Guardar (${n})` : "Guardar";
-  $("tbSave").textContent = n ? `Guardar cambios (${n})` : "Guardar cambios";
+  setLabel($("save"), n ? `Guardar (${n})` : "Guardar");
+  setLabel($("tbSave"), n ? `Guardar cambios (${n})` : "Guardar cambios");
   $("modBadge").hidden = !mod.has(S.current);
   $("saveOne").disabled = !mod.has(S.current) || !connected;
 }
@@ -266,25 +284,30 @@ function updateActions(mod = new Set(modified())) {
 function renderBrowser(mod) {   // the 36 presets at a glance, like the desktop app
   const root = $("browserGrid");
   root.innerHTML = "";
-  for (let b = 0; b < 9; b++) {
+  for (let b = 0; b < 9; b++) {   // one card per bank, four tiles A-D with the LED colour strip (gui.SlotButton)
+    const card = document.createElement("div");
+    card.className = "bcard";
     const h = document.createElement("div");
     h.className = "bhead";
-    h.textContent = `BANCO ${b + 1}` + (bankName(b) ? ` · ${bankName(b)}` : "");
-    root.append(h);
+    h.innerHTML = `<b>BANCO ${b + 1}</b>`;
+    if (bankName(b)) h.append(` · ${bankName(b)}`);
+    card.append(h);
     const row = document.createElement("div");
     row.className = "brow";
     for (let i = 0; i < 4; i++) {
       const s = b * 4 + i, p = S.local.presets[s];
       const c = document.createElement("button");
       c.className = "bslot" + (s === S.current ? " sel" : "") + (mod.has(s) ? " mod" : "");
-      c.style.borderColor = s === S.current ? "#fff" : rgbHex(p);
-      c.textContent = presetName(s) || ampName(p);
+      c.style.setProperty("--c", ledColor(p));
+      c.innerHTML = `<small>${slotName(s)}</small><span></span>`;
+      c.querySelector("span").textContent = presetName(s) || ampName(p);
       c.title = `${slotName(s)} · ${ampName(p)}`;
       c.dataset.slot = s;
       c.onclick = () => { select(s); closeBrowser(); };
       row.append(c);
     }
-    root.append(row);
+    card.append(row);
+    root.append(card);
   }
 }
 
@@ -340,6 +363,7 @@ function modal({ title, step = "", rows = [], bar = false, ok = null, cancel = "
   $("mInput").hidden = true;
   $("mBody").innerHTML = "";
   $("mOk").hidden = !ok;
+  $("mOk").disabled = false;
   $("mOk").textContent = ok || "";
   $("mClose").textContent = cancel;
   $("mClose").disabled = false;
@@ -567,10 +591,9 @@ function renderLibList() {
       root.append(h);
     }
     const item = document.createElement("button");
-    item.className = "bank-item";
-    item.innerHTML = "<b></b><small></small>";
-    item.querySelector("b").textContent = b.name;
-    item.querySelector("small").textContent = b.presets.map(p => p.role).join(" · ");
+    item.className = "bank-item card-row" + (S.libBank === b ? " sel" : "");
+    item.innerHTML = cardHtml({ badge: initials(b.name), color: ledOf(b.presets[1].hex), title: b.name,
+      sub: b.presets.map(p => p.role).join(" · "), pips: b.presets.map(p => ledOf(p.hex)), chip: AMP_MODELS[fromHex(b.presets[1].hex)[5]] });
     item.onclick = () => showLibBank(b);
     root.append(item);
     count++;
@@ -585,10 +608,9 @@ function renderLibList() {
     root.append(h);
     for (const p of packs) {
       const item = document.createElement("button");
-      item.className = "bank-item";
-      item.innerHTML = "<b></b><small></small>";
-      item.querySelector("b").textContent = `★ ${p.title}${missingModels([p]).length ? "  ⬇" : ""}`;
-      item.querySelector("small").textContent = `AMP: ${p.amps.map(a => a.name).join(" · ")}`;
+      item.className = "bank-item card-row";
+      item.innerHTML = cardHtml({ badge: "★", color: "#ffd36b", title: p.title, sub: `AMP: ${p.amps.map(a => a.name).join(" · ")}`,
+        pips: p.presets.map(x => ledColor(x.record)), chip: missingModels([p]).length ? "⬇ descarga" : "AMP listo" });
       item.onclick = () => { $("libSheet").hidden = true; runPackImport(p); };
       root.append(item);
       count++;
@@ -601,6 +623,7 @@ function showLibBank(b) {
   S.libBank = b;
   S.libPick = 0;
   $("libList").hidden = !document.body.classList.contains("tablet");
+  if (document.body.classList.contains("tablet")) renderLibList();   // the list stays beside it: mark the bank
   $("libDetail").hidden = false;
   $("libTitle").textContent = b.name;
   $("libDesc").textContent = b.genre;
@@ -622,16 +645,12 @@ function renderLibPresets() {
   root.innerHTML = "";
   S.libBank.presets.forEach((p, i) => {
     const c = document.createElement("button");
-    const color = fromHex(p.hex).slice(18, 21);
-    c.className = "pcard" + (i === S.libPick ? " sel" : "");
-    c.style.setProperty("--c", `rgb(${color.join(",")})`);
-    c.innerHTML = '<div class="role"></div><b></b><span></span><span></span>';
-    c.querySelector(".role").textContent = `${"ABCD"[i]} · ${p.role.toUpperCase()}`;
-    c.querySelector("b").textContent = p.name;
-    const [d, s] = c.querySelectorAll("span");
-    d.textContent = p.desc;
-    s.textContent = p.summary;
+    c.className = "pcard card-row" + (i === S.libPick ? " sel" : "");
+    c.innerHTML = cardHtml({ badge: "ABCD"[i], color: ledOf(p.hex), title: `${p.role.toUpperCase()} · ${p.name}`, sub: p.desc,
+      chip: AMP_MODELS[fromHex(p.hex)[5]] }) + '<span class="summary"></span>';
+    c.querySelector(".summary").textContent = p.summary;
     c.onclick = () => { S.libPick = i; renderLibPresets(); };
+    c.ondblclick = () => $("libOne").click();
     root.append(c);
   });
   $("libOne").textContent = `Aplicar «${S.libBank.presets[S.libPick].name}» a ${slotName(S.current)}`;
@@ -1182,6 +1201,155 @@ function diffText(other, title) {
 
 // preset operations (same set as the desktop Editar menu) -----------------------------------------
 
+/** Setlists (desktop SetlistDialog): saved shows with a note per song, stage mode and, optionally,
+ *  the songs put in footswitch order. Saved in aliases.setlists, so they sync through the cloud. */
+const SL = { index: 0, slots: [] };
+const curSetlist = () => aliases.setlists[SL.index];
+const storeSetlists = () => { saveAliases(); scheduleCloud(); };
+
+function openSetlist() {
+  aliases.setlists = setlist.clean(aliases.setlists);
+  if (!aliases.setlists.length) aliases.setlists.push({ title: "Mi show", songs: [] });
+  SL.index = Math.min(SL.index, aliases.setlists.length - 1);
+  renderSetlist();
+  $("setSheet").hidden = false;
+}
+
+function renderSetlist() {
+  const sl = curSetlist();
+  sl.songs = setlist.refresh(sl.songs, S.local, aliases.presets);
+  SL.slots = setlist.resolve(sl.songs, S.local, aliases.presets);
+  $("setPick").innerHTML = "";
+  aliases.setlists.forEach((x, i) => $("setPick").add(new Option(`${x.title} (${x.songs.length})`, i)));
+  $("setPick").value = SL.index;
+  $("setTitle").value = sl.title;
+  const list = $("setSongs");
+  list.innerHTML = "";
+  sl.songs.forEach((s, i) => {
+    const li = document.createElement("li"), slot = SL.slots[i];
+    li.className = slot === null ? "lost" : "";
+    li.innerHTML = `<b class="dot"></b><span><em></em><small><u></u><i></i></small></span><button aria-label="Nota">✎</button><button aria-label="Subir">↑</button><button aria-label="Bajar">↓</button><button aria-label="Quitar">✕</button>`;
+    const dot = li.querySelector("b");
+    dot.textContent = slot === null ? "⚠" : slotName(slot);
+    if (slot !== null) {
+      const p = S.local.presets[slot];
+      dot.style.background = ledColor(p);
+      dot.style.color = lightColor(p) ? "#10161a" : "#fff";
+      li.querySelector("u").textContent = aliases.amps?.[String(p[5] + 1)] || ampName(p);
+    }
+    li.querySelector("em").textContent = `${i + 1}. ${setlist.label(s)}`;
+    li.querySelector("i").textContent = slot === null ? "Su preset ya no está en el editor" : s.note || "";
+    const [note, up, down, del] = li.querySelectorAll("button");
+    up.disabled = i === 0;
+    down.disabled = i === sl.songs.length - 1;
+    note.onclick = async () => {
+      const t = await promptText("Nota de la canción", "Afinación, capo, tempo, «entra con fade»…", s.note || "");
+      if (t !== null) { s.note = t.trim(); storeSetlists(); renderSetlist(); }
+    };
+    const swap = j => { [sl.songs[i], sl.songs[j]] = [sl.songs[j], sl.songs[i]]; storeSetlists(); renderSetlist(); };
+    up.onclick = () => swap(i - 1);
+    down.onclick = () => swap(i + 1);
+    del.onclick = () => { sl.songs.splice(i, 1); storeSetlists(); renderSetlist(); };
+    list.append(li);
+  });
+  const pool = $("setPool");
+  pool.innerHTML = "";
+  for (let b = 0; b < 9; b++) {
+    const lab = document.createElement("span");
+    lab.textContent = b + 1;
+    pool.append(lab);
+    for (let i = 0; i < 4; i++) {
+      const s = b * 4 + i, btn = document.createElement("button");
+      btn.textContent = presetName(s) || slotName(s);
+      btn.style.borderColor = rgbHex(S.local.presets[s]);
+      btn.disabled = SL.slots.includes(s);
+      btn.onclick = () => { sl.songs.push(setlist.song(S.local, aliases.presets, s)); storeSetlists(); renderSetlist(); };
+      pool.append(btn);
+    }
+  }
+  const start = $("setStart"), keep = Number(start.value) || 0, n = Math.max(1, sl.songs.length);
+  start.innerHTML = "";
+  for (let s = 0; s <= SLOTS - n; s++) start.add(new Option(`Desde ${slotName(s)} (banco ${Math.floor(s / 4) + 1})`, s));
+  start.value = Math.min(keep, SLOTS - n);
+  setlistInfo();
+}
+
+function setlistInfo() {
+  const songs = curSetlist().songs, start = Number($("setStart").value) || 0, lost = SL.slots.filter(s => s === null).length;
+  $("setOrder").disabled = !songs.length || !!lost;
+  $("setStage").disabled = $("setCopy").disabled = !songs.length;
+  $("setInfo").className = lost ? "muted error" : "muted";
+  if (!songs.length) $("setInfo").textContent = "Todavía no hay canciones: tócalas abajo en el orden del show.";
+  else if (lost) $("setInfo").textContent = `${lost} canción(es) ya no tienen su preset en el editor (⚠): quítalas o vuelve a agregarlas para poder ordenar.`;
+  else {
+    const moved = setlist.layout(SL.slots, start).filter((old, s) => old !== s).length;
+    $("setInfo").textContent = `${songs.length} canciones. Ordenadas irían de ${slotName(start)} a ${slotName(start + songs.length - 1)}`
+      + (moved ? ` (cambian de lugar ${moved} presets).` : ": ya están en ese orden.");
+  }
+}
+
+function orderSetlist() {
+  const start = Number($("setStart").value) || 0, n = SL.slots.length;
+  const source = setlist.layout(SL.slots, start);
+  pushUndo();
+  S.local = setlist.apply(S.local, source);
+  aliases.presets = setlist.moveNames(aliases.presets, source);
+  aliases.presetAmps = setlist.moveNames(aliases.presetAmps || {}, source);
+  storeSetlists();
+  S.current = start;
+  render();
+  renderSetlist();
+  const moved = S.device ? modified().length : source.filter((old, s) => old !== s).length;
+  toast(`Ordenado de ${slotName(start)} a ${slotName(start + n - 1)}. `
+    + (moved ? `«Guardar» pasa a la pedalera los ${moved} presets cambiados (Deshacer lo vuelve atrás).` : "No hubo que mover nada."), 6000);
+}
+
+// stage mode: big letters, tap right / ▶ / volume-free page turner keys for the next song
+const ST = { pos: -1, songs: [], slots: [] };
+function openStage() {
+  const sl = curSetlist();
+  Object.assign(ST, { pos: -1, songs: sl.songs, slots: [...SL.slots] });
+  $("stTitle").textContent = `SETLIST · ${sl.title}`;
+  $("stage").hidden = false;
+  A.keepAwake?.(true);
+  stageGo(0);
+}
+
+function stageGo(i) {
+  if (i < 0 || i >= ST.songs.length || i === ST.pos) return;
+  ST.pos = i;
+  const s = ST.songs[i], slot = ST.slots[i], next = ST.songs[i + 1];
+  $("stCount").textContent = `${i + 1} / ${ST.songs.length}`;
+  $("stProg").firstElementChild.style.width = `${((i + 1) * 100) / ST.songs.length}%`;
+  $("stSlot").textContent = slot === null ? "—" : slotName(slot);
+  const p = slot === null ? null : S.local.presets[slot];
+  const glow = p ? ledColor(p) : "#ff7d8f", rgb = glow.slice(1).match(/../g).map(h => parseInt(h, 16)).join(", ");
+  $("stage").style.setProperty("--glow", glow);
+  $("stage").style.setProperty("--glow-soft", `rgba(${rgb}, .3)`);
+  $("stage").style.setProperty("--glow-halo", `rgba(${rgb}, .55)`);
+  $("stAmp").textContent = p ? `${aliases.amps?.[String(p[5] + 1)] || ampName(p)} · ${CAB_MODELS[p[17]] ?? "?"}` : "";
+  $("stMain").classList.remove("enter");
+  void $("stMain").offsetWidth;   // restart the entry animation
+  $("stMain").classList.add("enter");
+  $("stName").textContent = setlist.label(s);
+  $("stNote").textContent = s.note || "";
+  let warn = "";
+  if (slot === null) warn = "Este preset ya no está en el editor.";
+  else {
+    S.current = slot;
+    render();
+    if (!S.dev) warn = "Pedalera no conectada: solo se muestra.";
+    else {
+      if (modified().includes(slot)) warn = "Cambios sin guardar: suena la versión de la pedalera.";
+      try { S.dev.selectPreset(slot); } catch (e) { warn = String(e.message || e); }
+    }
+  }
+  $("stWarn").textContent = warn;
+  $("stNext").textContent = next ? `${ST.slots[i + 1] === null ? "—" : slotName(ST.slots[i + 1])} · ${setlist.label(next)}` : "Fin del show";
+  $("stPrev").disabled = i === 0;
+  $("stFwd").disabled = i + 1 >= ST.songs.length;
+}
+
 function swapSlots(a, b) {
   pushUndo();
   const p = S.local.presets;
@@ -1489,7 +1657,7 @@ const C = { started: false, ready: false, busy: false, timer: 0 };
 const cloudStatus = text => { $("cloudStatus").textContent = text; $("cloudStatus").hidden = !text; };
 const cloudDoc = () => {
   const bank = S.local || S.device;
-  return bank && !S.demo ? cloud.makeDoc(bank, aliases.presets, aliases.banks, aliases.amps, aliases.ampSources, aliases.presetAmps) : null;
+  return bank && !S.demo ? cloud.makeDoc(bank, aliases.presets, aliases.banks, aliases.amps, aliases.ampSources, aliases.presetAmps, aliases.setlists) : null;
 };
 
 function scheduleCloud(ms = 2500) {
@@ -1584,7 +1752,7 @@ async function cloudPush(quiet = true) {
 function loadCloud(r) {
   if (S.local) pushUndo();
   S.local = r.bank;
-  aliases = { ...aliases, presets: r.presets, banks: r.banks, amps: r.amps || {}, ampSources: r.ampSources || {}, presetAmps: r.presetAmps || {} };
+  aliases = { ...aliases, presets: r.presets, banks: r.banks, amps: r.amps || {}, ampSources: r.ampSources || {}, presetAmps: r.presetAmps || {}, setlists: r.setlists || [] };
   saveAliases();
   render();
   setTimeout(offerCloudModels, 300);
@@ -1649,6 +1817,14 @@ async function cloudHistory() {
 
 const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const icon = name => `<svg class="ic" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+/** Toolbar and bottom bar buttons: a line icon of the menu (tankg/menu.py) and their label. */
+const BAR_ICONS = { tbRead: "refresh", tbSave: "save", tbUndo: "undo", tbLib: "library", tbSet: "setlist",
+  undo: "undo", library: "library", setlists: "setlist", save: "save" };
+const setLabel = (b, text) => { (b.querySelector("span") || b).textContent = text; };
+function barIcons() {
+  for (const [id, name] of Object.entries(BAR_ICONS)) $(id).innerHTML = `${icon(name)}<span>${$(id).textContent}</span>`;
+  for (const el of document.querySelectorAll("[data-icon]")) el.insertAdjacentHTML("afterbegin", `<i class="disc">${icon(el.dataset.icon)}</i>`);
+}
 
 function renderMenu() {
   // the icons (tankg/menu.py) as an SVG sprite, shared by every menu entry
@@ -1670,7 +1846,7 @@ function menuState() {
   const off = { saveAll: !dev || !n, saveOne: !dev || !curMod, activate: !dev, live: !dev, undo: !S.undo.length,
     paste: !S.clipboard, revert: !curMod, revertAll: !n, backupNow: !dev, restoreFile: !dev, ampUpload: !dev, factoryAmpCab: !dev,
     cloudPush: !has, cloudPull: !has };
-  for (const c of ["copy", "duplicate", "swap", "left", "right", "renameBank", "library", "ai", "factory", "factoryBank", "factoryAll",
+  for (const c of ["copy", "duplicate", "swap", "left", "right", "setlist", "renameBank", "library", "ai", "factory", "factoryBank", "factoryAll",
     "saveBank", "importPreset", "exportPreset", "importSet", "exportSet", "compare", "bytes", "exportPack"]) off[c] = off[c] || !has;
   for (const b of $("menuBody").querySelectorAll("[data-cmd]")) {
     const c = b.dataset.cmd;
@@ -1768,6 +1944,7 @@ async function run(cmd) {
     case "swap": { const d = await pickSlot("Intercambiar preset", cur); if (d !== null) swapSlots(cur, d); return; }
     case "left": if (cur > 0) swapSlots(cur, cur - 1); return;
     case "right": if (cur < SLOTS - 1) swapSlots(cur, cur + 1); return;
+    case "setlist": return openSetlist();
     case "rename": $("alias").focus(); $("alias").select(); return;
     case "renameBank": {
       const b = Math.floor(cur / 4), v = await promptText(`Nombre del banco ${b + 1}`, "Solo en esta app: la pedalera no guarda nombres.", bankName(b));
@@ -1953,13 +2130,57 @@ function wire() {
     const u = S.undo.pop();
     if (!u) return;
     S.local = u.bank;
-    aliases = { ...JSON.parse(u.aliases), amps: aliases.amps, ampSources: aliases.ampSources };   // the AMP models live in the pedal
+    aliases = { ...JSON.parse(u.aliases), amps: aliases.amps, ampSources: aliases.ampSources,   // the AMP models live in the pedal
+      setlists: aliases.setlists };                                                               // and setlists aren't edits
     saveAliases();
     render();
   };
   $("save").onclick = $("tbSave").onclick = saveAll;
   $("library").onclick = $("tbLib").onclick = openLibrary;
+  $("setlists").onclick = $("tbSet").onclick = openSetlist;
   $("libSearch").oninput = renderLibList;
+  $("setPick").onchange = () => { SL.index = Number($("setPick").value); renderSetlist(); };
+  $("setTitle").oninput = () => {
+    curSetlist().title = $("setTitle").value.trim() || "Setlist";
+    $("setPick").options[SL.index].text = `${curSetlist().title} (${curSetlist().songs.length})`;
+    storeSetlists();
+  };
+  $("setNew").onclick = () => {
+    aliases.setlists.push({ title: `Show ${aliases.setlists.length + 1}`, songs: [] });
+    SL.index = aliases.setlists.length - 1;
+    storeSetlists();
+    renderSetlist();
+    $("setTitle").focus();
+    $("setTitle").select();
+  };
+  $("setDel").onclick = async () => {
+    const sl = curSetlist();
+    if (sl.songs.length && !(await ask("Borrar setlist", `¿Borrar «${sl.title}»? Los presets no se tocan.`, "Borrar"))) return;
+    aliases.setlists.splice(SL.index, 1);
+    if (!aliases.setlists.length) aliases.setlists.push({ title: "Mi show", songs: [] });
+    SL.index = Math.min(SL.index, aliases.setlists.length - 1);
+    storeSetlists();
+    renderSetlist();
+  };
+  $("setStart").onchange = setlistInfo;
+  $("setOrder").onclick = orderSetlist;
+  $("setCopy").onclick = () => { A.copyText(setlist.text(curSetlist().title, curSetlist().songs, SL.slots)); toast("Lista copiada"); };
+  $("setStage").onclick = openStage;
+  $("stPrev").onclick = () => stageGo(ST.pos - 1);
+  $("stFwd").onclick = () => stageGo(ST.pos + 1);
+  let touch = null, swiped = false;   // swipe left / right, or tap: left third back, rest forward
+  $("stage").addEventListener("touchstart", e => { touch = e.changedTouches[0]; swiped = false; }, { passive: true });
+  $("stage").addEventListener("touchend", e => {
+    const dx = e.changedTouches[0].clientX - (touch?.clientX ?? 0);
+    if (touch && Math.abs(dx) > 60) { swiped = true; stageGo(ST.pos + (dx < 0 ? 1 : -1)); }
+  }, { passive: true });
+  $("stMain").onclick = e => { if (!swiped) stageGo(ST.pos + (e.clientX < innerWidth / 3 ? -1 : 1)); swiped = false; };
+  new MutationObserver(() => { if ($("stage").hidden) A.keepAwake?.(false); }).observe($("stage"), { attributes: true, attributeFilter: ["hidden"] });
+  document.addEventListener("keydown", e => {   // Bluetooth page turners and keyboards
+    if ($("stage").hidden) return;
+    if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); stageGo(ST.pos + 1); }
+    else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) { e.preventDefault(); stageGo(ST.pos - 1); }
+  });
   for (const b of document.querySelectorAll("[data-close]")) b.onclick = () => {
     if (!$("libDetail").hidden && !$("libSheet").hidden && !document.body.classList.contains("tablet")) showLibList();
     else b.closest(".sheet").hidden = true;
@@ -1985,6 +2206,7 @@ function wire() {
 
 buildModules();
 renderMenu();
+barIcons();
 wire();
 loadAliases();
 applyView();
