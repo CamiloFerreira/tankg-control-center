@@ -28,7 +28,8 @@ def test_ui_protocol():
 def test_ui_ai_and_files_match_python(tmp_path):
     """Same apply_design, browser prompt and interchangeable .tgpreset/.tgset files in JS and Python."""
     import json
-    from tankg import ai, am4, artists, library, pack, setlist
+    import itertools
+    from tankg import ai, am4, artists, cloud, library, pack, setlist
     from tankg.model import FIELDS, Bank, Preset, zone_gap
     live = (ROOT / "tests/live_bank.bin").read_bytes()
     bank = Bank.from_bytes(live)
@@ -72,6 +73,8 @@ def test_ui_ai_and_files_match_python(tmp_path):
                           for o, st in [([20, 3, 0, 35, 5], 2), ([0, 1, 2], 0), ([35, 34, 33, 32], 30), (list(range(36))[::-1], 0)]],
               "setlistSongs": songs, "setlistNames": names,
               "setlistText": setlist.text("Show ", songs + [{"slot": "9D", "raw": "", "name": "", "note": ""}], [3, 7, 0, None, None]),
+              "startup": [[list(k), cloud.startup_action(*k)] for k in itertools.product(["C", "S", None], ["C", "L", None],
+                                                                                     ["S", None], ["P", None])],
               "setlistDirty": [{"title": "", "songs": [{"slot": "6A", "raw": "00ff", "name": 3}, {"slot": "77", "raw": "x"}, 5]}, 3],
               "setlistClean": setlist.clean([{"title": "", "songs": [{"slot": "6A", "raw": "00ff", "name": 3}, {"slot": "77", "raw": "x"}, 5]}, 3])}
     golden_pack = json.loads(golden["packPy"])

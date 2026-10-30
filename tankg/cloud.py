@@ -247,6 +247,21 @@ def doc_amp_sources(doc: dict) -> dict:
     return {k: dict(v) for k, v in ((doc.get("aliases") or {}).get("ampSources") or {}).items()}
 
 
+def startup_action(cloud_key: str | None, current_key: str | None, synced: str | None,
+                   pending_key: str | None) -> str:
+    """What to do at start with the cloud version (same rule as startupAction in cloud.js):
+    "same" (nothing to do), "cloud" (take it), "local" (changes made here never reached the cloud and
+    the cloud has not changed since this device last synced: keep them and upload) or "conflict"
+    (both changed: ask). `pending_key` is the doc_key of the last version this device could not upload."""
+    if pending_key:
+        if cloud_key == pending_key:
+            return "same"
+        return "local" if cloud_key is None or cloud_key == synced else "conflict"
+    if cloud_key is None:
+        return "local"   # first device: the cloud starts with this setup
+    return "same" if cloud_key == current_key else "cloud"
+
+
 def push(drive: Drive, doc: dict) -> None:
     """Uploads `doc` as the latest version; the previous latest goes to the history."""
     files = drive.list()

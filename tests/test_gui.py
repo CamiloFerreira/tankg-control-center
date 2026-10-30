@@ -212,6 +212,45 @@ def test_cloud_autosync_edits_and_loads_newer_at_start(env, tmp_path, monkeypatc
     assert w.controls["amp_type"].combo.itemText(2) == "3. RANDALL"
     assert set(w.modified_slots()) >= {1} and not messages   # in the editor only, until «Guardar cambios»
     assert library.Settings().cloud["synced"] == cloud.doc_key(newer)
+    # offline: a change that never reached the cloud survives closing the app and goes up at the next start
+    monkeypatch.setattr(cloud, "push", lambda *a: (_ for _ in ()).throw(cloud.CloudError("sin red")))
+    w.aliases.set_preset(2, "Hecho sin red")
+    w.aliases.setlists.append({"title": "Show offline", "songs": []})
+    w.refresh()
+    assert wait(lambda: "se reintentará" in w.cloud_label.text(), 8)
+    assert library.Settings().cloud["pending"]["aliases"]["presets"]["1C"] == "Hecho sin red"
+    monkeypatch.undo()   # the network is back
+    monkeypatch.setattr(cloud, "_request", google)
+    monkeypatch.setattr(cloud, "CLIENT_ID", "id")
+    monkeypatch.setattr(cloud, "CLIENT_SECRET", "secret")
+    monkeypatch.setattr(library, "SETTINGS_FILE", tmp_path / "settings.json")
+    w.aliases.presets.pop("1C")          # the next start: names as the pedal-read editor had them
+    w.aliases.setlists.clear()
+    w._cloud_started = w._cloud_ready = False
+    w.cloud_startup()
+    assert wait(lambda: "guardados" in w.cloud_label.text(), 8)
+    assert w.aliases.preset(2) == "Hecho sin red" and w.aliases.setlists[0]["title"] == "Show offline" and not messages
+    latest = json.loads(next(f for f in google.files.values() if f["name"] == cloud.LATEST)["body"])
+    assert latest["aliases"]["presets"]["1C"] == "Hecho sin red" and "pending" not in library.Settings().cloud
+    # both changed (another device saved meanwhile): asks, and «Los de la nube» keeps a backup of this one
+    library.Settings().set_cloud({**library.Settings().cloud, "pending": w._cloud_doc() | {"bank": other.to_bytes().hex()}})
+    phone = cloud.make_doc(w.device, {"1A": "Del teléfono"}, {}, "Android · moto")
+    next(f for f in google.files.values() if f["name"] == cloud.LATEST)["body"] = json.dumps(phone).encode()
+    backups = []
+    with mock.patch.object(dialogs, "choose", lambda *a: False), \
+            mock.patch.object(library, "backup", lambda bank, why: backups.append(why)):
+        w._cloud_started = w._cloud_ready = False
+        w.cloud_startup()
+        assert wait(lambda: not w._bg and w._cloud_ready)
+    assert w.aliases.preset(0) == "Del teléfono" and backups == ["sin-subir"]
+
+
+def test_cloud_startup_rule():
+    from tankg import cloud
+    table = {("C", "C", "S", None): "same", ("C", "L", "S", None): "cloud", (None, "L", None, None): "local",
+             ("S", "L", "S", "P"): "local", (None, "L", "S", "P"): "local", ("C", "L", "S", "P"): "conflict",
+             ("P", "L", "S", "P"): "same"}
+    assert {k: cloud.startup_action(*k) for k in table} == table
 
 
 @pytest.mark.parametrize("which", ["factory", "amp"])

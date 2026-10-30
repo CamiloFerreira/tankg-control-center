@@ -1666,15 +1666,30 @@ function scheduleCloud(ms = 2500) {
   C.timer = setTimeout(cloudAutoPush, ms);
 }
 
+/** This device and the cloud now hold `doc` (gui._mark_synced): a pending version is dropped. */
+async function markSynced(doc) {
+  const { pending, ...state } = cloudState();
+  setCloud({ ...state, synced: await cloud.docKey(doc) });
+}
+
+/** Keeps the editor and names the cloud does not have yet, so they survive closing the app offline or
+ *  before the upload (cloudStartup offers them back; gui._remember_pending). */
+async function rememberPending() {
+  const doc = drive() && cloudDoc();
+  if (doc && (await cloud.docKey(doc)) !== cloudState().synced) setCloud({ ...cloudState(), pending: doc });
+}
+
 async function cloudAutoPush() {
   const d = drive(), doc = cloudDoc();
   if (!d || !doc || (await cloud.docKey(doc)) === cloudState().synced) return;
   if (C.busy) return scheduleCloud();
   C.busy = true;
+  await rememberPending();
   cloudStatus("☁ Guardando cambios en la nube…");
   try {
     await cloud.push(d, doc);
-    setCloud({ ...cloudState(), synced: await cloud.docKey(doc) });
+    await markSynced(doc);
+    if (cloudDoc() && (await cloud.docKey(cloudDoc())) !== (await cloud.docKey(doc))) await rememberPending();   // edited during the upload
     cloudStatus(`☁ Cambios guardados en la nube ${new Date().toTimeString().slice(0, 5)}`);
     C.busy = false;
     scheduleCloud();   // changes made during the upload
@@ -1686,7 +1701,8 @@ async function cloudAutoPush() {
 }
 
 /** Once per start (after connecting the pedal, or a few seconds without it): the editor takes the cloud
- *  version; it only asks when something was edited here before the sync finished. */
+ *  version, unless changes made here never reached it (cloud.startupAction, same as gui.cloud_startup).
+ *  It asks when both changed, or when something was edited here before the sync finished. */
 async function cloudStartup() {
   if (C.started || S.demo) return;
   C.started = true;
@@ -1697,16 +1713,29 @@ async function cloudStartup() {
   let doc;
   try { doc = await cloud.pull(d); } catch { C.ready = true; return cloudStatus("☁ Sin conexión con la nube"); }
   C.ready = true;
-  const current = cloudDoc(), key = doc && await cloud.docKey(doc);
-  if (!doc || (current && (await cloud.docKey(current)) === key)) {
-    if (doc) setCloud({ ...cloudState(), synced: key });
-    cloudStatus("☁ Al día con la nube");
-    return scheduleCloud();   // first device: the cloud starts with this setup
+  const current = cloudDoc(), key = doc && await cloud.docKey(doc), pending = cloudState().pending;
+  let action = cloud.startupAction(key || null, current ? await cloud.docKey(current) : null, cloudState().synced,
+    pending ? await cloud.docKey(pending) : null);
+  if (action === "conflict") {
+    const keep = await ask("Nube", "Este equipo tiene cambios que no llegaron a la nube y, mientras tanto, se guardó otra versión "
+      + `desde ${doc.device || "otro equipo"} (${cloud.when(doc.updated)}).\n¿Cuál quieres usar? La otra queda en el historial `
+      + "de la nube o en los backups.", "Los de este equipo");
+    if (!keep) backup(cloud.parseDoc(pending).bank, "sin-subir");   // this device's version, just in case
+    action = keep ? "local" : "cloud";
   }
-  if (!current || S.undo.length === edits || await ask("Nube", `Hay presets en la nube guardados desde ${doc.device || "otro equipo"} `
+  if (action === "same") {
+    if (doc) await markSynced(doc);
+    cloudStatus("☁ Al día con la nube");
+  } else if (action === "local") {
+    if (pending && (!current || (await cloud.docKey(current)) !== (await cloud.docKey(pending)))) {
+      loadCloud(cloud.parseDoc(pending));
+      toast("Se recuperaron los cambios de este equipo que no habían llegado a la nube.", 5000);
+    }
+    cloudStatus("☁ Subiendo los cambios de este equipo…");
+  } else if (!current || S.undo.length === edits || pending || await ask("Nube", `Hay presets en la nube guardados desde ${doc.device || "otro equipo"} `
     + `(${cloud.when(doc.updated)}) y aquí ya hiciste cambios.\n¿Cargar los de la nube? (si no, la nube se actualiza con lo de este equipo)`)) {
     loadCloud(cloud.parseDoc(doc));
-    setCloud({ ...cloudState(), synced: key });
+    await markSynced(doc);
     cloudStatus(`☁ Sincronizado con la nube (${doc.device || "otro equipo"})`);
   }
   scheduleCloud();
@@ -1744,7 +1773,7 @@ async function cloudPush(quiet = true) {
   if (!doc) return;
   try {
     await cloud.push(d, doc);
-    setCloud({ ...cloudState(), synced: await cloud.docKey(doc) });
+    await markSynced(doc);
     toast("Sincronizado con Google Drive", 1800);
   } catch (e) { quiet ? toast(`Nube: ${e.message}`, 5000) : info("Nube", e.message); }
 }
@@ -1783,11 +1812,11 @@ async function cloudCheck({ manual = false, afterConnect = false } = {}) {
   if (!doc) { if (afterConnect || manual) cloudPush(!manual); return; }
   const r = cloud.parseDoc(doc), key = await cloud.docKey(doc);
   const same = key === (await cloud.docKey(cloudDoc()));
-  if (same) { setCloud({ ...cloudState(), synced: key }); if (manual) info("Nube", "La nube y este equipo ya tienen lo mismo."); return; }
+  if (same) { await markSynced(doc); if (manual) info("Nube", "La nube y este equipo ya tienen lo mismo."); return; }
   if (!manual && key === cloudState().synced) return;
   if (await ask("Nube", `Hay presets en la nube guardados desde ${doc.device || "otro equipo"} (${cloud.when(doc.updated)}).\n` +
     "¿Cargarlos en el editor? La pedalera no cambia hasta que pulses «Guardar».")) loadCloud(r);
-  setCloud({ ...cloudState(), synced: key });
+  await markSynced(doc);
 }
 
 async function cloudHistory() {
@@ -2176,6 +2205,8 @@ function wire() {
   }, { passive: true });
   $("stMain").onclick = e => { if (!swiped) stageGo(ST.pos + (e.clientX < innerWidth / 3 ? -1 : 1)); swiped = false; };
   new MutationObserver(() => { if ($("stage").hidden) A.keepAwake?.(false); }).observe($("stage"), { attributes: true, attributeFilter: ["hidden"] });
+  // Android may kill the app in the background: a change still waiting for its upload is kept (rememberPending)
+  document.addEventListener("visibilitychange", () => { if (document.hidden && C.ready) rememberPending(); });
   document.addEventListener("keydown", e => {   // Bluetooth page turners and keyboards
     if ($("stage").hidden) return;
     if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); stageGo(ST.pos + 1); }

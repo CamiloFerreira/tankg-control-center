@@ -8,6 +8,7 @@ import { SIG, TANH } from "../../android/ui/js/am4.js";
 import { packFile, parsePackFile, parsePresetFile, parseSetFile, presetFile, remapPack, setFile } from "../../android/ui/js/files.js";
 import { Bank, fromHex, toHex } from "../../android/ui/js/protocol.js";
 import * as setlist from "../../android/ui/js/setlist.js";
+import { startupAction } from "../../android/ui/js/cloud.js";
 
 const g = JSON.parse(readFileSync(process.argv[2], "utf8"));
 for (const c of g.designs) assert.equal(toHex(applyDesign(c.design, c.like ? fromHex(c.like) : null)), c.expect, JSON.stringify(c.design));
@@ -42,6 +43,7 @@ for (const c of g.setlist) {
 assert.throws(() => setlist.layout([0, 1], 35));
 assert.equal(setlist.text("Show ", [...g.setlistSongs, { slot: "9D", raw: "", name: "", note: "" }], [3, 7, 0, null, null]), g.setlistText);
 assert.deepEqual(setlist.clean(g.setlistDirty), g.setlistClean);
+for (const [args, expect] of g.startup) assert.equal(startupAction(...args), expect, JSON.stringify(args));
 assert.deepEqual(setlist.song(bank, g.setlistNames, 4, "capo 2"), g.setlistSongs[0]);
 console.log(JSON.stringify({ preset: presetFile(fromHex(g.presetRaw), 5, g.presetName),
   set: setFile(bank, [4, 5, 6, 7], ["Uno", "", "Tres", "Cuatro"], "Mi banco"), pack: jsPack.text }));

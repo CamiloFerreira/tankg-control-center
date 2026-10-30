@@ -196,6 +196,17 @@ export async function history(drive) {
     ...files.filter(f => f.name.startsWith(HISTORY_PREFIX)).sort((a, b) => b.name.localeCompare(a.name))];
 }
 
+/** Same rule as cloud.startup_action: "same", "cloud", "local" (changes made here never reached the cloud
+ *  and the cloud has not changed since: keep them and upload) or "conflict" (both changed: ask). */
+export function startupAction(cloudKey, currentKey, synced, pendingKey) {
+  if (pendingKey) {
+    if (cloudKey === pendingKey) return "same";
+    return !cloudKey || cloudKey === synced ? "local" : "conflict";
+  }
+  if (!cloudKey) return "local";   // first device: the cloud starts with this setup
+  return cloudKey === currentKey ? "same" : "cloud";
+}
+
 export function when(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso || "";

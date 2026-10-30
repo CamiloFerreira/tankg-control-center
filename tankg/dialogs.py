@@ -172,6 +172,21 @@ def ask(parent, title: str, text: str) -> bool:
     return box.clickedButton() is yes
 
 
+def choose(parent, title: str, text: str, first: str, second: str) -> bool:
+    """Two-way question with named answers (no cancel); True = `first`."""
+    from PySide6.QtWidgets import QMessageBox
+    box = QMessageBox(QMessageBox.Question, title, text, parent=parent)
+    a = box.addButton(first, QMessageBox.AcceptRole)
+    b = box.addButton(second, QMessageBox.RejectRole)
+    for button, role in ((a, "primary"), (b, "secondary")):
+        button.setObjectName(role)
+        button.style().unpolish(button)
+        button.style().polish(button)
+    box.setDefaultButton(a)
+    box.exec()
+    return box.clickedButton() is a
+
+
 def menu_icon(name: str, color: str = "#8fe0be", size: int = 20) -> QPixmap:
     """A line icon of menu.ICONS drawn in `color` (sharp on high-DPI screens)."""
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" '

@@ -1747,8 +1747,20 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _mark_synced(doc: dict) -> None:
+        """This device and the cloud now hold `doc`; a pending version is dropped once it is the one synced
+        (or when the cloud version was taken instead)."""
         settings = library.Settings()
-        settings.set_cloud({**settings.cloud, "synced": cloud.doc_key(doc)})
+        state = {**settings.cloud, "synced": cloud.doc_key(doc)}
+        state.pop("pending", None)
+        settings.set_cloud(state)
+
+    def _remember_pending(self) -> None:
+        """Keeps the editor and names that the cloud does not have yet, so they survive closing the app
+        offline or before the upload (cloud_startup offers them back)."""
+        doc = self._cloud_doc() if self._drive() is not None else None
+        settings = library.Settings()
+        if doc is not None and cloud.doc_key(doc) != settings.cloud.get("synced"):
+            settings.set_cloud({**settings.cloud, "pending": doc})
 
     def cloud_connect(self) -> None:
         if not cloud.configured():
@@ -1806,11 +1818,14 @@ class MainWindow(QMainWindow):
             self.cloud_timer.start(2500)
             return
         self._cloud_busy = True
+        self._remember_pending()
         self._cloud_status("☁ Guardando cambios en la nube…")
 
         def done(_) -> None:
             self._cloud_busy = False
             self._mark_synced(doc)
+            if cloud.doc_key(self._cloud_doc()) != cloud.doc_key(doc):
+                self._remember_pending()   # edited again during the upload
             self._cloud_status(f"☁ Cambios guardados en la nube {time.strftime('%H:%M')}")
             self._schedule_cloud()   # changes made during the upload
 
@@ -1823,7 +1838,8 @@ class MainWindow(QMainWindow):
 
     def cloud_startup(self) -> None:
         """Once per start (after reading the pedal, or a few seconds without it): the editor takes the
-        cloud version; it only asks when something was edited here before the sync finished."""
+        cloud version, unless changes made here never reached it (cloud.startup_action). It asks when
+        both changed, or when something was edited here before the sync finished."""
         if self._cloud_started:
             return
         self._cloud_started = True
@@ -1835,14 +1851,31 @@ class MainWindow(QMainWindow):
 
         def done(doc) -> None:
             self._cloud_ready = True
-            current = self._cloud_doc()
-            if doc is None or (current is not None and cloud.doc_key(current) == cloud.doc_key(doc)):
+            current, settings = self._cloud_doc(), library.Settings().cloud
+            pending = settings.get("pending")
+            action = cloud.startup_action(cloud.doc_key(doc) if doc else None,
+                                          cloud.doc_key(current) if current else None, settings.get("synced"),
+                                          cloud.doc_key(pending) if pending else None)
+            if action == "conflict":
+                keep = dialogs.choose(
+                    self, "Nube", "Este equipo tiene cambios que no llegaron a la nube y, mientras tanto, se guardó "
+                                  f"otra versión desde {doc.get('device', 'otro equipo')} ({cloud_when(doc['updated'])})."
+                                  "\n¿Cuál quieres usar? La otra queda en el historial de la nube o en los backups.",
+                    "Los de este equipo", "Los de la nube")
+                if keep:
+                    action = "local"
+                else:
+                    library.backup(cloud.parse_doc(pending)[0], "sin-subir")   # this device's version, just in case
+                    action = "cloud"
+            if action == "same":
                 if doc is not None:
                     self._mark_synced(doc)
                 self._cloud_status("☁ Al día con la nube")
-                self._schedule_cloud()   # first device: the cloud starts with this setup
-                return
-            if current is None or len(self.undo_stack) == edits or dialogs.ask(
+            elif action == "local":
+                if pending and (current is None or cloud.doc_key(current) != cloud.doc_key(pending)):
+                    self.load_cloud(pending, "Se recuperaron los cambios de este equipo que no habían llegado a la nube.")
+                self._cloud_status("☁ Subiendo los cambios de este equipo…")
+            elif current is None or len(self.undo_stack) == edits or pending or dialogs.ask(
                     self, "Nube", f"Hay presets en la nube guardados desde {doc.get('device', 'otro equipo')} "
                                   f"({cloud_when(doc['updated'])}) y aquí ya hiciste cambios.\n¿Cargar los de la nube? "
                                   "(si no, la nube se actualiza con lo de este equipo)"):
@@ -1906,7 +1939,7 @@ class MainWindow(QMainWindow):
                          lambda m: QMessageBox.warning(self, "Nube", m) if manual else
                          self.statusBar().showMessage(f"Nube: {m}", 8000))
 
-    def load_cloud(self, doc: dict) -> None:
+    def load_cloud(self, doc: dict, message: str | None = None) -> None:
         """Editor, preset/bank names and AMP model names from a cloud version."""
         try:
             bank, presets, banks = cloud.parse_doc(doc)
@@ -1925,8 +1958,8 @@ class MainWindow(QMainWindow):
         self.refresh()
         self._offer_cloud_models()
         n = len(self.modified_slots())
-        self.statusBar().showMessage("Presets de la nube cargados" + (
-            f": {n} distintos de la pedalera, «Guardar cambios» los pasa." if n else "."), 8000)
+        self.statusBar().showMessage((message or "Presets de la nube cargados") + (
+            f" {n} distintos de la pedalera: «Guardar cambios» los pasa." if n else ""), 8000)
 
     def _offer_cloud_models(self) -> None:
         """The cloud version has AMP models uploaded on another device from the M-VAVE community:
@@ -2027,6 +2060,8 @@ class MainWindow(QMainWindow):
                 self, "Salir", "Hay presets modificados sin guardar en la pedalera. ¿Salir igualmente?"):
             event.ignore()
             return
+        if getattr(self, "_cloud_ready", False):
+            self._remember_pending()   # a change still waiting for its upload
         self.pool.waitForDone(10000)
         event.accept()
 
