@@ -435,6 +435,9 @@ class MainWindow(QMainWindow):
         self.busy = False
         self._jobs: set[Job] = set()
         self.connected = False
+        self._ble_ok = False      # a saved Bluetooth pedal counts as connected only once it answered
+        self._ble_try = -1e9      # last attempt to reach it (time.monotonic)
+        self._offline_undo: int | None = None   # editor opened from a backup without the pedal (undo depth then)
         self.session_backup_done = False
         self.live_timer = QTimer(self)
         self.live_timer.setSingleShot(True)
@@ -475,6 +478,7 @@ class MainWindow(QMainWindow):
         self.timer.start(2000)
         self._bg: set[Background] = set()
         QTimer.singleShot(4000, self.cloud_startup)   # without a pedal: sync the editor anyway
+        QTimer.singleShot(4500, self._offline_editor)
         settings = library.Settings()
         if updater.can_self_update() and time.time() - settings.data.get("last_update_check", 0) > 20 * 3600:   # once a day
             QTimer.singleShot(5000, lambda: self.check_updates(quiet=True))
@@ -1011,6 +1015,9 @@ class MainWindow(QMainWindow):
 
     def _job_failed(self, msg: str, quiet: bool, dialog=None) -> None:
         self.busy = False
+        if self._ble_ok:   # the Bluetooth pedal stopped answering: disconnected until it answers again
+            self._ble_ok = False
+            self._ble_try = time.monotonic()
         self.statusBar().clearMessage()
         if dialog is not None:
             dialog.failed(msg)
@@ -1022,29 +1029,72 @@ class MainWindow(QMainWindow):
 
     def choose_midi_port(self) -> None:
         if dialogs.MidiPortDialog(self).exec():
-            self.connected = False
+            self.connected = self._ble_ok = False
+            self._ble_try = -1e9   # try the chosen Bluetooth pedal right away
             self.device = None if not self.modified_slots() else self.device
             self._poll_device()
 
     def _poll_device(self) -> None:
+        """USB ports are seen by the system when the pedal is plugged in; a Bluetooth pedal saved in
+        «Puerto MIDI…» is only a candidate (it may be off or away), so it counts once it answered a read,
+        tried quietly every 30 s, and stops counting when an operation with it fails."""
         was = self.connected
-        self.connected = bool(find_devices())
+        devs = find_devices()
+        if devs and all(getattr(d, "backend", "") == "ble" for d in devs):
+            if not self._ble_ok and not self.busy and time.monotonic() - self._ble_try > 30:
+                self._ble_try = time.monotonic()
+                self.read_device(quiet=True)
+            self.connected = self._ble_ok
+        else:
+            self.connected = bool(devs)
         if not self.connected and not self.statusBar().currentMessage():
             self.statusBar().showMessage("No se detecta la Tank-G. Si está conectada, elige el puerto en "
                                          "☰ Menú → Puerto MIDI…")
         if self.connected != was:
             self.statusBar().showMessage("Tank-G conectada" if self.connected else "Tank-G desconectada", 4000)
-            if self.connected and self.device is None:
+            if self.connected and self.device is None and not self.busy:
                 self.read_device()
+            if self.connected:
+                self._schedule_cloud()   # what was edited without the pedal goes up now
         self._update_status()
 
-    def read_device(self) -> None:
-        if self.modified_slots() and not dialogs.ask(
+    def _offline_editor(self) -> None:
+        """No pedal and nothing in the editor (no cloud copy either): open the last backup, or the factory
+        presets, so presets, names and setlists can be worked on; the pedal replaces it when it is
+        connected unless something was edited meanwhile."""
+        if self.local is not None or self.connected or self.busy:
+            return
+        backups = library.list_backups()
+        bank, what = None, ""
+        for path in backups:
+            try:
+                bank, what = library.load_bank(path), f"el último backup ({path.name[5:20]})"
+                break
+            except (OSError, ValueError):
+                continue
+        if bank is None:
+            bank, what = library.factory_bank(), "los presets de fábrica"
+        if bank is None:
+            return
+        self.local = bank
+        self._offline_undo = len(self.undo_stack)
+        self.refresh()
+        self.statusBar().showMessage(f"Sin pedalera: el editor abre {what}. Puedes editar, nombrar y armar setlists; "
+                                     "la nube se actualiza al conectarla.", 10000)
+
+    def read_device(self, quiet: bool = False) -> None:
+        """`quiet`: the background attempt to reach a Bluetooth pedal (no questions, no error boxes, and
+        the editor is kept: what differs from the pedal stays as unsaved changes)."""
+        if not quiet and self.modified_slots() and not dialogs.ask(
                 self, "Leer pedalera", "Hay cambios sin guardar. ¿Descartarlos y leer la pedalera?"):
             return
 
         def done(bank: Bank) -> None:
-            first = self.device is None and self.local is not None   # editor loaded before the pedal (cloud, file)
+            self._ble_ok = True
+            first = (self.device is None or quiet) and self.local is not None   # editor loaded before (cloud, file, backup)
+            if self._offline_undo is not None and self._offline_undo == len(self.undo_stack):
+                first = False   # the backup opened without the pedal, untouched: the pedal replaces it
+            self._offline_undo = None
             self.device = bank
             if first:
                 self.statusBar().showMessage("Pedalera leída: lo distinto del editor queda como cambios sin guardar", 6000)
@@ -1055,7 +1105,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Presets leídos de la pedalera", 4000)
             QTimer.singleShot(300, self.cloud_startup)
 
-        if not self._run(lambda dev, _: dev.read_bank(), done, "Leyendo presets..."):
+        if not self._run(lambda dev, _: dev.read_bank(), done,
+                         "Buscando la Tank-G por Bluetooth…" if quiet else "Leyendo presets...", quiet_errors=quiet) and not quiet:
             QMessageBox.information(self, "Ocupado", "Hay una operación en curso.")
 
     def _write_job(self, slots: list[int], select: int | None):
@@ -1617,6 +1668,7 @@ class MainWindow(QMainWindow):
     def load_local_bank(self, bank: Bank, message: str) -> None:
         self._push_undo()
         self.local = bank
+        self._offline_undo = None
         self.refresh()
         self.statusBar().showMessage(message, 6000)
 
@@ -1814,6 +1866,10 @@ class MainWindow(QMainWindow):
         drive, doc = self._drive(), self._cloud_doc()
         if drive is None or doc is None or cloud.doc_key(doc) == library.Settings().cloud.get("synced"):
             return
+        if not self.connected:   # without the pedal nothing goes up: kept here until it is connected
+            self._remember_pending()
+            self._cloud_status("☁ Sin pedalera: los cambios se suben a la nube al conectarla")
+            return
         if self._cloud_busy:
             self.cloud_timer.start(2500)
             return
@@ -1948,6 +2004,7 @@ class MainWindow(QMainWindow):
             return
         self._push_undo()
         self.local = bank.copy()
+        self._offline_undo = None
         self.aliases.presets, self.aliases.banks = dict(presets), dict(banks)
         self.aliases.amps = cloud.doc_amps(doc)
         self.aliases.amp_sources = cloud.doc_amp_sources(doc)

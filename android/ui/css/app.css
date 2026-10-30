@@ -444,3 +444,6 @@ select { background: var(--field); color: #f0f0f0; border: 1px solid var(--borde
   .tablet .m-amp { order: 0; } .tablet .m-mod, .tablet .m-dly, .tablet .m-rvb { order: 1; }
   .tablet .m-gate, .tablet .m-cab { order: 2; }
 }
+
+/* narrow phones: «Control Center» gives way to the status and «Conectar» */
+@media (max-width: 480px) { .brand .sub { display: none; } }

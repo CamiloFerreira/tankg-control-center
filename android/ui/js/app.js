@@ -28,7 +28,7 @@ const DEMO_BANKS = ["Guitarra eléctrica", "Metallica", "Iron Maiden", "AC/DC", 
 
 const A = globalThis.AndroidMidi;   // native bridge of MainActivity (MIDI, Bluetooth, files, updates)
 const S = { dev: null, demo: false, device: null, local: null, current: 0, undo: [], busy: false,
-  backupDone: false, wanted: false, libBank: null, libPick: 0, clipboard: null, live: false };
+  backupDone: false, offlineUndo: null, wanted: false, libBank: null, libPick: 0, clipboard: null, live: false };
 
 // storage (per-viewer conveniences; everything still works if storage is blocked) ---------------
 
@@ -433,12 +433,30 @@ function adoptBank(bank, fresh = false) {
   }
   S.device = bank;
   // Keep unsaved edits across a reconnection of the same pedal, but never carry the demo bank
-  // over to a real pedal: «Guardar» would overwrite it with demo presets.
-  if (!S.local || fresh) {
+  // over to a real pedal: «Guardar» would overwrite it with demo presets. A backup opened without the
+  // pedal and left untouched gives way to the pedal (gui._offline_undo).
+  const offlineUntouched = S.offlineUndo !== null && S.offlineUndo === S.undo.length;
+  S.offlineUndo = null;
+  if (!S.local || fresh || offlineUntouched) {
     S.local = bank.copy();
     S.undo = [];
     S.backupDone = false;
   }
+}
+
+/** No pedal: open the last backup (or the factory presets) to work on presets, names and setlists
+ *  (gui._offline_editor); the cloud is updated once the pedal is connected. */
+function openOffline() {
+  const last = store.get("tankg.backups", [])[0];
+  const hex = last ? last.hex : factoryHex();
+  if (!hex) return info("Sin pedalera", "No hay backups ni presets de fábrica en esta versión.");
+  S.local = Bank.fromBytes(fromHex(hex));
+  S.device = null;
+  S.undo = [];
+  S.offlineUndo = 0;
+  loadAliases();
+  render();
+  toast(`Sin pedalera: el editor abre ${last ? "el último backup" : "los presets de fábrica"}. La nube se actualiza al conectarla.`, 5000);
 }
 
 function watchPorts(access) {
@@ -1682,6 +1700,10 @@ async function rememberPending() {
 async function cloudAutoPush() {
   const d = drive(), doc = cloudDoc();
   if (!d || !doc || (await cloud.docKey(doc)) === cloudState().synced) return;
+  if (!S.dev) {   // without the pedal nothing goes up: kept here until it is connected (gui._cloud_autopush)
+    await rememberPending();
+    return cloudStatus("☁ Sin pedalera: los cambios se suben a la nube al conectarla");
+  }
   if (C.busy) return scheduleCloud();
   C.busy = true;
   await rememberPending();
@@ -2071,6 +2093,7 @@ async function run(cmd) {
 function wire() {
   $("connect").onclick = $("connectBig").onclick = () => connect();
   $("demoBig").onclick = startDemo;
+  $("offlineBig").onclick = openOffline;
   $("menuBtn").onclick = openMenu;
   $("ampWarn").onclick = fixMissingAmp;
   $("menuSheet").onclick = e => { const b = e.target.closest("[data-cmd]"); if (b && !b.disabled) run(b.dataset.cmd); };

@@ -462,3 +462,50 @@ def test_library_cards(env):
     lib.presets.setCurrentRow(3)
     assert lib.detail.text() == lib._bank().presets[3].summary()
     assert [dialogs.initials(n) for n in ("Blind Guardian", "AC/DC", "★ Pantera", "")] == ["BG", "AC", "PA", "?"]
+
+
+def test_saved_bluetooth_pedal_counts_only_when_it_answers(env, tmp_path, monkeypatch):
+    from tankg import cloud
+    from tankg.device import DeviceError, DeviceInfo
+    w, pedal, wait, messages = env
+    ble = [DeviceInfo("ble", "Tank-G (Bluetooth)", "73:E0:23:DA:C1:2A")]
+    away = mock.patch.object(gui.TankG, "open", staticmethod(lambda info=None: (_ for _ in ()).throw(DeviceError("no responde"))))
+    with mock.patch.object(gui, "find_devices", lambda *a: ble), away:
+        w._ble_ok, w._ble_try = False, -1e9
+        w._poll_device()                       # tries it quietly once…
+        assert not w.connected and wait(lambda: not w.busy)
+        w._poll_device()                       # …and not again right away
+        assert not w.connected and not w.busy and "desconectada" in w.conn.text() and not messages
+    with mock.patch.object(gui, "find_devices", lambda *a: ble):
+        w._ble_try = -1e9
+        w._poll_device()                       # now it answers
+        assert wait(lambda: w._ble_ok and not w.busy)
+        w._poll_device()
+        assert w.connected and "conectada" in w.conn.text()
+    # without the pedal nothing goes up to the cloud: it waits as pending
+    monkeypatch.setattr(library, "SETTINGS_FILE", tmp_path / "settings.json")
+    library.Settings().set_cloud({"refresh_token": "r", "synced": "x"})
+    pushed = []
+    monkeypatch.setattr(cloud, "push", lambda drive, doc: pushed.append(doc))
+    w.connected, w._cloud_ready = False, True
+    w._cloud_autopush()
+    assert not pushed and "pending" in library.Settings().cloud and "Sin pedalera" in w.cloud_label.text()
+    w.connected = True
+    w._cloud_autopush()
+    assert wait(lambda: pushed and not w._cloud_busy)
+
+
+def test_editor_opens_last_backup_without_pedal(env, tmp_path, monkeypatch):
+    w, pedal, wait, _ = env
+    other = w.device.copy()
+    other.presets[0].set("gain", 7)
+    path = tmp_path / "bank-20261029-120000-auto.tgbank"
+    path.write_bytes(other.to_bytes())
+    monkeypatch.setattr(library, "list_backups", lambda: [path])
+    w.local = w.device = None
+    w.connected = False
+    w._offline_editor()
+    assert w.local.presets[0].get("gain") == 7 and w.device is None
+    w.connected = True
+    w.read_device()                            # untouched: the pedal replaces it
+    assert wait(lambda: not w.busy) and w.local.to_bytes() == w.device.to_bytes()
