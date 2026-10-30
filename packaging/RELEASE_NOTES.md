@@ -11,6 +11,14 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
+## Novedades (1.10.2)
+
+- **Estado de conexión real.** Con una Tank-G guardada por Bluetooth, la app decía «conectada» aunque la pedalera
+  estuviera apagada o lejos. Ahora solo lo dice cuando la pedalera responde (la busca sola cada 30 s).
+- **Trabajar sin la pedalera.** Sin pedalera puedes editar, nombrar y armar setlists: el editor abre con tu último
+  backup (en Android, «Editar sin pedalera» en la pantalla de inicio). La nube no se actualiza mientras tanto; los
+  cambios quedan guardados en el equipo y se suben solos al conectar la pedalera.
+
 ## Novedades (1.10.1)
 
 - **La nube ya no pisa cambios sin subir.** Si cerraste la app sin conexión (o antes de que se subiera un cambio),
