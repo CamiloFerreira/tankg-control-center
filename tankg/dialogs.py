@@ -1099,6 +1099,7 @@ class CardDelegate(QStyledItemDelegate):
             painter.setFont(scaled_font(option.font, 0.8))
             chip_w = painter.fontMetrics().horizontalAdvance(chip) + 16
             chip_r = QRectF(r.right() - chip_w - 8, r.center().y() - 11, chip_w, 22)
+            painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(FIELD))
             painter.drawRoundedRect(chip_r, 11, 11)
             painter.setPen(QColor(TEXT_DIM))

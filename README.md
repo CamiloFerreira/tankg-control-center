@@ -12,9 +12,13 @@ class-compliant: no necesita drivers) y, en la Tank-G v2, por **Bluetooth**.
   <img src="docs/img/desktop-main.png" width="520" alt="Ventana principal en el escritorio">
 </p>
 
-| Biblioteca de sonidos | Crear con IA | Subida con verificación |
+| Setlists con notas | Modo escenario | Biblioteca de sonidos |
 |---|---|---|
-| ![Biblioteca](docs/img/desktop-library.png) | ![IA](docs/img/desktop-ai.png) | ![Subida](docs/img/desktop-upload.png) |
+| ![Setlists](docs/img/desktop-setlists.png) | ![Modo escenario](docs/img/desktop-stage.png) | ![Biblioteca](docs/img/desktop-library.png) |
+
+| Crear con IA | Subida con verificación |
+|---|---|
+| ![IA](docs/img/desktop-ai.png) | ![Subida](docs/img/desktop-upload.png) |
 
 | Android: pedalera | Menú con buscador | Buscar «amp» | Packs de bandas con AMP | Crear con IA |
 |---|---|---|---|---|
