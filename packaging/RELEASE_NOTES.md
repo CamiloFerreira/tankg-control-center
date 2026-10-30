@@ -11,6 +11,13 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
+## Novedades (1.10.1)
+
+- **La nube ya no pisa cambios sin subir.** Si cerraste la app sin conexión (o antes de que se subiera un cambio),
+  al abrirla recupera esos cambios y los sube, en vez de cargar la versión de la nube. Si mientras tanto otro
+  equipo guardó en la nube, pregunta cuál usar; la otra versión queda en el historial de la nube o en los backups.
+- Detalle visual: algunos chips de AMP en las tarjetas salían con un borde blanco.
+
 ## Novedades (1.10.0)
 
 - **Setlists y modo escenario.** Botón «Setlists» junto a la Biblioteca (Ctrl+J; en Android, en la barra de abajo).
