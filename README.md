@@ -33,15 +33,17 @@ class-compliant: no necesita drivers) y, en la Tank-G v2, por **Bluetooth**.
 ## Ejecutable (sin Python)
 
 En **Releases** de GitHub: `TankG-windows-x64.exe` (Windows) y `TankG-linux-x86_64` (Linux), un
-solo archivo cada uno. Para generarlos localmente:
+solo archivo cada uno, y `TankG-linux-amd64.deb` para Debian/Ubuntu/Mint 22.04+
+(`sudo apt install ./TankG-linux-amd64.deb`: menú de aplicaciones y comando `tankg`). Para generarlos localmente:
 
 ```bash
 .venv/bin/pip install pyinstaller
 .venv/bin/python packaging/build.py        # → dist/TankG (dist\TankG.exe en Windows)
 packaging/install-linux.sh                 # Linux: copia a ~/.local/bin y añade la app al menú
+packaging/build_deb.sh                     # Linux: dist/TankG → dist/TankG-linux-amd64.deb
 ```
 
-Una etiqueta `vX.Y.Z` subida a GitHub compila ambos y publica el release
+Una etiqueta `vX.Y.Z` subida a GitHub compila todo (también el `.deb`) y publica el release
 (`.github/workflows/release.yml`).
 
 ### Firma y verificación

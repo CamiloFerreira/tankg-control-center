@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -424,6 +425,8 @@ def test_updater_versions_and_checksums(monkeypatch):
     sums = "abc123  TankG-linux-x86_64\nDEF456  TankG-windows-x64.exe\n"
     assert updater.expected_sha256(sums, "TankG-windows-x64.exe") == "def456"
     assert updater.expected_sha256(sums, "otro") is None
+    assert updater.installed_from_deb("/opt/tankg/TankG") == (sys.platform == "linux")
+    assert not updater.installed_from_deb("/home/u/.local/bin/TankG")
     doc = {"tag_name": "v9.9.9", "body": "Novedades\n## Verificar la descarga\nx",
            "assets": [{"name": updater.ASSET or "x", "browser_download_url": "https://e/bin"},
                       {"name": "SHA256SUMS", "browser_download_url": "https://e/sums"}]}

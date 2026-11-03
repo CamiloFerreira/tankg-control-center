@@ -2,13 +2,15 @@
 (tankg.version.RELEASES_REPO). The APK does the same through android/ui/js/app.js + MainActivity.
 
 Only the PyInstaller builds replace themselves; running from source just reports the new
-version. Every download is checked against the release's SHA256SUMS before it is used.
+version. The Debian package (packaging/build_deb.sh, /opt/tankg/TankG owned by root) updates by
+downloading the new .deb and installing it with pkexec + apt-get. Every download is checked against the release's SHA256SUMS before it is used.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,7 +24,15 @@ from .version import RELEASES_REPO, __version__
 API = f"https://api.github.com/repos/{RELEASES_REPO}/releases/latest"
 PAGE = f"https://github.com/{RELEASES_REPO}/releases/latest"
 ASSETS = {"win32": "TankG-windows-x64.exe", "linux": "TankG-linux-x86_64"}
-ASSET = ASSETS.get(sys.platform)
+DEB_ASSET = "TankG-linux-amd64.deb"
+DEB_DIR = Path("/opt/tankg")
+
+
+def installed_from_deb(exe: str | None = None) -> bool:
+    return sys.platform == "linux" and Path(exe or sys.executable).resolve().parent == DEB_DIR
+
+
+ASSET = DEB_ASSET if getattr(sys, "frozen", False) and installed_from_deb() else ASSETS.get(sys.platform)
 
 
 class UpdateError(Exception):
@@ -104,6 +114,16 @@ def install(data: bytes) -> None:
             f'start "" "{exe}"\r\ndel "%~f0"\r\n', encoding="utf-8")
         subprocess.Popen(["cmd", "/c", str(script)], creationflags=0x08000000 | 0x00000008,   # no window, detached
                          close_fds=True)
+    elif installed_from_deb(str(exe)):
+        # Root-owned: apt installs the new package (pkexec asks for the password), then we restart.
+        deb = Path(tempfile.gettempdir()) / DEB_ASSET
+        deb.write_bytes(data)
+        deb.chmod(0o644)
+        if shutil.which("pkexec") and shutil.which("apt-get"):
+            script = f'pkexec apt-get install -y "{deb}" && rm -f "{deb}"; exec "{exe}"'
+            subprocess.Popen(["sh", "-c", script], start_new_session=True, close_fds=True)
+        else:
+            subprocess.Popen(["xdg-open", str(deb)], start_new_session=True, close_fds=True)
     else:
         tmp = exe.with_name(exe.name + ".new")
         tmp.write_bytes(data)

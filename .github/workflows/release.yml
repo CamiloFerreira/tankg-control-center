@@ -75,6 +75,16 @@ jobs:
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
+      - name: Debian package
+        if: runner.os == 'Linux'
+        run: |
+          packaging/build_deb.sh "${{ matrix.asset }}" TankG-linux-amd64.deb
+          dpkg-deb --info TankG-linux-amd64.deb
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: TankG-linux-amd64.deb
+          path: TankG-linux-amd64.deb
 
   android:
     needs: version

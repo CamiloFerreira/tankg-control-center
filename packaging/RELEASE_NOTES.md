@@ -6,6 +6,9 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
   puerto MIDI solo lo puede usar un programa a la vez).
 - **Linux:** `TankG-linux-x86_64` — `chmod +x TankG-linux-x86_64 && ./TankG-linux-x86_64`.
   Con argumentos funciona como línea de comandos (`./TankG-linux-x86_64 list`).
+- **Debian / Ubuntu / Mint (22.04+):** `TankG-linux-amd64.deb` — `sudo apt install ./TankG-linux-amd64.deb`.
+  Queda en el menú de aplicaciones y como comando `tankg` (`tankg list`). Se actualiza sola desde la app
+  (pide la contraseña para instalar el nuevo paquete).
 - **Android 6+:** `TankG-android.apk` — ábrelo en el teléfono o tablet y permite «instalar apps de
   esta fuente». Conecta la pedalera con un adaptador **USB-OTG** o por **Bluetooth** (Tank-G v2).
 
