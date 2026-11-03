@@ -13,11 +13,12 @@ import time
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRect, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter
+from PySide6.QtCore import QObject, QRect, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QMenu, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QInputDialog, QLabel, QLineEdit, QMenu, QMainWindow, QMessageBox, QProgressDialog, QPushButton, QScrollArea,
+    QSizePolicy,
     QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
@@ -479,9 +480,10 @@ class MainWindow(QMainWindow):
         self._bg: set[Background] = set()
         QTimer.singleShot(4000, self.cloud_startup)   # without a pedal: sync the editor anyway
         QTimer.singleShot(4500, self._offline_editor)
-        settings = library.Settings()
-        if updater.can_self_update() and time.time() - settings.data.get("last_update_check", 0) > 20 * 3600:   # once a day
-            QTimer.singleShot(5000, lambda: self.check_updates(quiet=True))
+        self._forcing = False
+        if updater.can_self_update():
+            # Every start: a mandatory (security) update blocks the app; optional ones are offered once a day.
+            QTimer.singleShot(500, lambda: self.check_updates(quiet=True, startup=True))
         self._poll_device()
 
     # layout --------------------------------------------------------------------------
@@ -2065,9 +2067,14 @@ class MainWindow(QMainWindow):
         task.signals.failed.connect(lambda m: (self._bg.discard(task), on_failed(m)))
         self.pool.start(task)
 
-    def check_updates(self, quiet: bool = False) -> None:
+    def check_updates(self, quiet: bool = False, startup: bool = False) -> None:
         def done(rel: updater.Release) -> None:
+            if updater.required(rel):
+                self._force_update(rel)
+                return
             settings = library.Settings()
+            if startup and time.time() - settings.data.get("last_update_check", 0) < 20 * 3600:   # offered once a day
+                return
             settings.data["last_update_check"] = time.time()
             settings.save()
             if not updater.newer(rel.version):
@@ -2103,6 +2110,53 @@ class MainWindow(QMainWindow):
 
         self._background(updater.latest, done, failed)
 
+    def _force_update(self, rel: updater.Release) -> None:
+        """This version is no longer allowed (the release declares a newer minimum version): nothing
+        else can be done until the update is installed. Only «Actualizar» or «Salir»."""
+        if self._forcing:
+            return
+        self._forcing = True
+        self.timer.stop()          # no more pedal polling or cloud uploads from an outdated version
+        self.cloud_timer.stop()
+        box = QMessageBox(QMessageBox.Icon.Critical, "Actualización obligatoria",
+                          f"La versión {__version__} ya no se puede usar: la {rel.version} corrige problemas "
+                          f"de seguridad importantes.\n\n{rel.notes[:700]}", parent=self)
+        if updater.can_self_update():
+            go = box.addButton("Actualizar ahora", QMessageBox.ButtonRole.AcceptRole)
+        else:
+            box.setInformativeText(f"Descarga la versión nueva en {updater.PAGE} (con el código fuente: «git pull»).")
+            go = box.addButton("Abrir la página de descarga", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Salir", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is not go:
+            QApplication.quit()
+            return
+        if not updater.can_self_update():
+            QDesktopServices.openUrl(QUrl(updater.PAGE))
+            QApplication.quit()
+            return
+        wait = QProgressDialog(f"Descargando la versión {rel.version}…", "", 0, 0, self)
+        wait.setWindowTitle("Actualización obligatoria")
+        wait.setCancelButton(None)
+        wait.setWindowModality(Qt.WindowModality.ApplicationModal)
+        wait.show()
+
+        def installed(data: bytes) -> None:
+            wait.close()
+            try:
+                updater.install(data)
+            except OSError as e:
+                QMessageBox.critical(self, "Actualizar", f"No se pudo instalar la actualización: {e}")
+            QApplication.quit()
+
+        def failed(msg: str) -> None:
+            wait.close()
+            QMessageBox.warning(self, "Actualización obligatoria", f"No se pudo descargar: {msg}")
+            self._forcing = False
+            self._force_update(rel)   # again: retry or quit
+
+        self._background(lambda: updater.download(rel), installed, failed)
+
     def about(self) -> None:
         QMessageBox.about(self, "Tank-G Control Center",
                           f"<p><b>Versión {__version__}</b></p>"
@@ -2113,7 +2167,7 @@ class MainWindow(QMainWindow):
                           f'<a href="{TERMS_URL}">Condiciones del servicio</a></p>')
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API
-        if self.modified_slots() and not dialogs.ask(
+        if not getattr(self, "_forcing", False) and self.modified_slots() and not dialogs.ask(
                 self, "Salir", "Hay presets modificados sin guardar en la pedalera. ¿Salir igualmente?"):
             event.ignore()
             return

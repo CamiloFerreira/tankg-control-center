@@ -9,6 +9,9 @@ import { packFile, parsePackFile, parsePresetFile, parseSetFile, presetFile, rem
 import { Bank, fromHex, toHex } from "../../android/ui/js/protocol.js";
 import * as setlist from "../../android/ui/js/setlist.js";
 import { startupAction } from "../../android/ui/js/cloud.js";
+import { minVersion, updateRequired } from "../../android/ui/js/update.js";
+import { checkRecord } from "../../android/ui/js/protocol.js";
+import { checkUrl } from "../../android/ui/js/ai.js";
 
 const g = JSON.parse(readFileSync(process.argv[2], "utf8"));
 for (const c of g.designs) assert.equal(toHex(applyDesign(c.design, c.like ? fromHex(c.like) : null)), c.expect, JSON.stringify(c.design));
@@ -47,3 +50,7 @@ for (const [args, expect] of g.startup) assert.equal(startupAction(...args), exp
 assert.deepEqual(setlist.song(bank, g.setlistNames, 4, "capo 2"), g.setlistSongs[0]);
 console.log(JSON.stringify({ preset: presetFile(fromHex(g.presetRaw), 5, g.presetName),
   set: setFile(bank, [4, 5, 6, 7], ["Uno", "", "Tres", "Cuatro"], "Mi banco"), pack: jsPack.text }));
+// mandatory updates, the verified-byte guard and the AI URL rule behave like updater.py / model.py / ai.py
+for (const c of g.updates) assert.deepEqual([minVersion(c.body), updateRequired(c.latest, minVersion(c.body), c.current)], [c.min, c.required], JSON.stringify(c));
+for (const c of g.records) assert.equal((() => { try { checkRecord(0, fromHex(c.raw)); return true; } catch { return false; } })(), c.ok, c.raw);
+for (const c of g.urls) assert.equal((() => { try { checkUrl(c.url); return true; } catch { return false; } })(), c.ok, c.url);

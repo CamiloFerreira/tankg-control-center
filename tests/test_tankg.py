@@ -907,3 +907,71 @@ def test_setlist_songs_find_their_presets_after_moving(tmp_path):
     assert library.Aliases(tmp_path / "a.json").setlists == [{"title": "Show", "songs": songs}]
     doc = cloud.make_doc(bank, {}, {}, setlists=aliases.setlists)
     assert cloud.doc_setlists(doc) == aliases.setlists and "setlists" not in cloud.make_doc(bank, {}, {})["aliases"]
+
+
+def test_security_hardening(tmp_path, monkeypatch):
+    """Guards added by the security review (SECURITY.md)."""
+    import os
+    from tankg import ai, device, library, updater
+    from tankg.model import Bank, check_writable
+    bank = Bank.from_bytes((ROOT / "tests/live_bank.bin").read_bytes())
+    # verified bytes out of range never reach the pedal
+    check_writable(bank.presets[0])
+    bad = bank.presets[0].copy()
+    bad.raw[5] = 200
+    with pytest.raises(ValueError):
+        check_writable(bad)
+    with pytest.raises(device.DeviceError):
+        device._writable(0, bad)
+    # files with secrets: 0600 inside a 0700 folder, atomic
+    path = tmp_path / "data" / "settings.json"
+    library.write_private_json(path, {"cloud": {"refresh_token": "x"}})
+    assert json.loads(path.read_text())["cloud"]["refresh_token"] == "x"
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600 and path.parent.stat().st_mode & 0o777 == 0o700
+    path.write_text("[1, 2]")
+    assert library.Settings(path).data == {}
+    # damaged / crafted files are rejected with ValueError, not a crash
+    for text in ('[1]', '{"format": "tankg-preset", "raw": 5}', '{"format": "tankg-preset"}',
+                 '{"format": "tankg-preset", "raw": "' + "00" * 400 + '"}'):
+        (tmp_path / "x.tgpreset").write_text(text)
+        with pytest.raises(ValueError):
+            library.load_preset_file(tmp_path / "x.tgpreset")
+    (tmp_path / "x.tgset").write_text('{"format": "tankg-set", "presets": [{"raw": []}]}')
+    with pytest.raises(ValueError):
+        library.load_set(tmp_path / "x.tgset")
+    # AI: https, or http only on the local network; answers with huge numbers are an AIError
+    assert ai.check_url("http://localhost:11434/v1") and ai.check_url("https://api.openai.com/v1")
+    for url in ("http://example.com/v1", "file:///etc/passwd", "ftp://x"):
+        with pytest.raises(ai.AIError):
+            ai.check_url(url)
+    design = dict(ai.parse_design_text(json.dumps({k: 1 for k in ai.SCHEMA["required"]})) or {})
+    assert design
+    design["gain"] = float("inf")
+    with pytest.raises(ai.AIError):
+        ai.from_text(json.dumps(design))
+    # mandatory updates
+    assert updater.min_version("x <!-- tankg-min-version: 1.11.0 --> y") == "1.11.0"
+    assert updater.required(updater.Release("1.12.0", "", None, None, "1.11.0"), "1.10.2")
+    assert not updater.required(updater.Release("1.12.0", "", None, None, "1.11.0"), "1.11.0")
+    assert not updater.required(updater.Release("1.12.0", "", None, None, ""), "1.0.0")
+
+
+def test_deb_update_uses_a_private_folder(tmp_path, monkeypatch):
+    """The .deb is handed to apt (root) from a fresh private folder, never a fixed name in /tmp."""
+    import tempfile
+    from tankg import updater
+    if sys.platform != "linux":
+        pytest.skip("Linux only")
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    runs = []
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda args, **kw: runs.append(args))
+    monkeypatch.setattr(updater.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(updater.sys, "executable", "/opt/tankg/TankG")
+    monkeypatch.setattr(updater.Path, "resolve", lambda self: self)
+    (tmp_path / updater.DEB_ASSET).symlink_to(tmp_path / "victim")   # an old fixed-name trap is ignored
+    updater.install(b"deb")
+    deb = Path(runs[0][4])
+    assert deb.parent != tmp_path and deb.parent.parent == tmp_path and deb.read_bytes() == b"deb"
+    assert deb.parent.stat().st_mode & 0o777 == 0o711 and not (tmp_path / "victim").exists()
+    assert runs[0][:3] == ["sh", "-c", 'pkexec apt-get install -y "$1"; rm -rf "$2"; exec "$3"']

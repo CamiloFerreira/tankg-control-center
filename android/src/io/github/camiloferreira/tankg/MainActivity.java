@@ -360,6 +360,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void openUrl(String url) {
+            if (!isWebUrl(url)) return;   // only http(s): never intent:, file: or content: links from the page
             ui.post(() -> {
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
@@ -374,6 +375,7 @@ public class MainActivity extends Activity {
          *  clipboard anyway), else the web page. Returns "shared", "app" or "web". */
         @JavascriptInterface
         public String openChat(String pkg, String url, String text) {
+            if (!isWebUrl(url)) return "web";
             PackageManager pm = getPackageManager();
             Intent intent = null;
             String where = "web";
@@ -429,6 +431,7 @@ public class MainActivity extends Activity {
                 int status = 0;
                 String text;
                 try {
+                    if (!isWebUrl(url)) throw new IOException("solo se permiten direcciones http(s)");
                     HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
                     c.setRequestMethod(method);
                     c.setConnectTimeout(20000);
@@ -468,6 +471,10 @@ public class MainActivity extends Activity {
                         Uri.parse("package:" + getPackageName()))));
                 return;
             }
+            if (!url.startsWith("https://") || !sumsUrl.startsWith("https://")) {
+                update("error", "La actualización debe descargarse por https.");
+                return;
+            }
             new Thread(() -> {
                 try {
                     update("download", "Descargando…");
@@ -487,6 +494,7 @@ public class MainActivity extends Activity {
                             new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
                     params.setAppPackageName(getPackageName());
                     int sessionId = pi.createSession(params);
+                    installSession = sessionId;
                     try (PackageInstaller.Session session = pi.openSession(sessionId)) {
                         try (OutputStream out = session.openWrite("TankG.apk", 0, apk.length)) {
                             out.write(apk);
@@ -494,8 +502,10 @@ public class MainActivity extends Activity {
                         }
                         ui.post(() -> {
                             IntentFilter f = new IntentFilter(INSTALL_ACTION);
+                            // Not exported (33+) / only senders holding our signature permission (older):
+                            // another app must not be able to post a fake install status with its own Intent.
                             if (Build.VERSION.SDK_INT >= 33) registerReceiver(installReceiver, f, Context.RECEIVER_NOT_EXPORTED);
-                            else registerReceiver(installReceiver, f);
+                            else registerReceiver(installReceiver, f, INSTALL_PERMISSION, null);
                         });
                         Intent status = new Intent(INSTALL_ACTION).setPackage(getPackageName());
                         int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
@@ -515,6 +525,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String saveFile(String name, String base64, String mime) {
+            name = safeName(name);
             byte[] data = Base64.decode(base64, Base64.DEFAULT);
             try {
                 if (Build.VERSION.SDK_INT >= 29) {
@@ -547,10 +558,14 @@ public class MainActivity extends Activity {
     private final BroadcastReceiver installReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (installSession < 0 || intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1) != installSession) return;
             int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
             if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
                 Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
-                if (confirm != null) startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                // only the system installer's confirmation screen, never an arbitrary activity
+                if (confirm != null && confirm.getAction() != null && confirm.getAction().startsWith("android.content.pm.action.CONFIRM_")
+                        && confirm.getSelector() == null && (confirm.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION)) == 0)
+                    startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 update("confirm", "Confirma la instalación en la ventana de Android.");
             } else if (status == PackageInstaller.STATUS_SUCCESS) {
                 update("done", "Actualizado.");
@@ -559,6 +574,22 @@ public class MainActivity extends Activity {
             }
         }
     };
+
+    private static final String INSTALL_PERMISSION = "io.github.camiloferreira.tankg.permission.INSTALL_STATUS";
+    private volatile int installSession = -1;
+
+    private static boolean isWebUrl(String url) {
+        if (url == null) return false;
+        String scheme = Uri.parse(url).getScheme();
+        return "https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme);
+    }
+
+    /** A plain file name: no folders, no hidden files, nothing the system would read as a path. */
+    private static String safeName(String name) {
+        String n = name == null ? "" : name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").replaceAll("^\\.+", "");
+        if (n.length() > 120) n = n.substring(n.length() - 120);
+        return n.isEmpty() ? "tankg.bin" : n;
+    }
 
     private static byte[] readAll(InputStream in) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -571,6 +602,7 @@ public class MainActivity extends Activity {
     /** GET following redirects (GitHub release assets redirect to a CDN). */
     private static byte[] download(String url) throws IOException {
         for (int hops = 0; hops < 5; hops++) {
+            if (!url.startsWith("https://")) throw new IOException("descarga sin https rechazada");
             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
             c.setInstanceFollowRedirects(false);
             c.setConnectTimeout(20000);

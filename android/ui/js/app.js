@@ -11,6 +11,7 @@ import { PACK_EXTENSION, communityKey, communityUrl, creditText, fromBase64, pac
 import * as cloud from "./cloud.js";
 import * as am4 from "./am4.js";
 import * as setlist from "./setlist.js";
+import { minVersion, newer, updateRequired } from "./update.js";
 
 const $ = id => document.getElementById(id);
 const F = Object.fromEntries(FIELDS.map(f => [f.key, f]));
@@ -387,7 +388,7 @@ function info(title, text) {
 // pedal operations ----------------------------------------------------------------------------
 
 async function connect(silent = false) {
-  if (S.busy) return;
+  if (S.busy || S.blocked) return;
   S.busy = true;
   $("emptyError").textContent = "";
   try {
@@ -1628,11 +1629,36 @@ function aiApply() {
 
 // updates -----------------------------------------------------------------------------------------
 
-const versionTuple = v => String(v).replace(/^v/, "").split(".").map(n => parseInt(n, 10) || 0);
-const newer = (a, b) => { const x = versionTuple(a), y = versionTuple(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
 const appVersion = () => A.version?.() || VERSION;
 
-async function checkUpdate(manual = false) {
+/** A release declared this version unusable (security fix): a screen that covers the whole app,
+ *  with only «Actualizar» (or the download page). Back leaves the app. */
+function forceUpdate(rel, notes, apk, sums) {
+  if (S.blocked) return;
+  S.blocked = true;
+  S.wanted = false;   // no pedal connections or cloud uploads from an outdated version
+  const box = document.createElement("div");
+  box.id = "forceUpdate";
+  Object.assign(box.style, { position: "fixed", inset: "0", zIndex: "9999", background: "#15191d", color: "#eee", padding: "24px",
+    display: "flex", flexDirection: "column", gap: "14px", justifyContent: "center", overflow: "auto" });
+  const h = document.createElement("h2"), p = document.createElement("p"), small = document.createElement("p"), btn = document.createElement("button");
+  h.textContent = "Actualización obligatoria";
+  p.textContent = `La versión ${appVersion()} ya no se puede usar: la ${rel.tag_name.replace(/^v/, "")} corrige problemas de seguridad importantes.`;
+  small.textContent = notes;
+  Object.assign(small.style, { whiteSpace: "pre-wrap", opacity: "0.75", fontSize: "14px" });
+  btn.className = "btn primary";
+  btn.textContent = apk ? "Actualizar ahora" : "Abrir la página de descarga";
+  btn.onclick = () => {
+    if (!apk) { A.openUrl?.(rel.html_url || `https://github.com/${RELEASES_REPO}/releases/latest`); return; }
+    modal({ title: "Actualizando", step: "Preparando…", bar: false });
+    $("mClose").onclick = closeModal;
+    A.installUpdate(apk, sums);
+  };
+  box.append(h, p, btn, small);
+  document.body.append(box);
+}
+
+async function checkUpdate(manual = false, startup = false) {
   let rel;
   try {
     const r = await fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, { headers: { accept: "application/vnd.github+json" } });
@@ -1643,11 +1669,17 @@ async function checkUpdate(manual = false) {
     if (manual) info("Actualizaciones", `No se pudo consultar las versiones (${e.message}). ¿Hay internet?`);
     return;
   }
-  store.set("tankg.lastUpdateCheck", Date.now());
   const latest = rel.tag_name, current = appVersion();
-  if (!newer(latest, current)) { if (manual) info("Actualizaciones", `Tienes la última versión (${current}).`); return; }
   const asset = n => (rel.assets || []).find(a => a.name === n)?.browser_download_url;
-  const notes = String(rel.body || "").split("\n## Verificar")[0].slice(0, 900);
+  const body = String(rel.body || "");
+  const notes = body.replace(/<!--[\s\S]*?-->/g, "").split("\n## Verificar")[0].trim().slice(0, 900);
+  if (updateRequired(latest, minVersion(body), current)) {
+    forceUpdate(rel, notes, asset("TankG-android.apk") && asset("SHA256SUMS") ? asset("TankG-android.apk") : null, asset("SHA256SUMS"));
+    return;
+  }
+  if (startup && Date.now() - store.get("tankg.lastUpdateCheck", 0) < 20 * 3600 * 1000) return;   // optional: once a day
+  store.set("tankg.lastUpdateCheck", Date.now());
+  if (!newer(latest, current)) { if (manual) info("Actualizaciones", `Tienes la última versión (${current}).`); return; }
   if (asset("TankG-android.apk") && asset("SHA256SUMS")) {
     if (await ask(`Versión ${latest.replace(/^v/, "")} disponible`, `Tienes la ${current}.\n\n${notes}\n\n¿Descargar e instalar ahora?`, "Actualizar")) {
       modal({ title: "Actualizando", step: "Preparando…", bar: false });
@@ -2250,6 +2282,7 @@ function wire() {
   };
   // Android back button (MainActivity asks before leaving the app): close what is open, topmost first
   window.__back = () => {
+    if (S.blocked && $("modal").hidden) return false;   // mandatory update: back leaves the app
     if (!$("modal").hidden) { if (!$("mClose").disabled) $("mClose").click(); return true; }   // busy dialogs stay
     const open = [...document.querySelectorAll(".sheet")].reverse().find(s => !s.hidden);
     if (open) { (open.querySelector("[data-close]") || { click: () => { open.hidden = true; } }).click(); return true; }
@@ -2275,6 +2308,7 @@ setInterval(() => {   // a Bluetooth pedal sends no "plugged in" event: retry qu
   if (S.wanted && !S.dev && !S.busy && !S.demo && document.visibilityState === "visible" && androidBluetoothPedals().length) connect(true);
 }, 15000);
 
-if (Date.now() - store.get("tankg.lastUpdateCheck", 0) > 20 * 3600 * 1000) setTimeout(() => checkUpdate(false), 4000);
+// Every start: a mandatory (security) update blocks the app; optional ones are offered once a day.
+setTimeout(() => checkUpdate(false, true), 1500);
 
 window.tankg = { S, connect, startDemo, upload, applyPresets, run, checkUpdate };   // for debugging over adb

@@ -46,6 +46,9 @@ packaging/build_deb.sh                     # Linux: dist/TankG → dist/TankG-li
 Una etiqueta `vX.Y.Z` subida a GitHub compila todo (también el `.deb`) y publica el release
 (`.github/workflows/release.yml`).
 
+Seguridad: vulnerabilidades corregidas, cómo reportar una y actualizaciones obligatorias en
+[`SECURITY.md`](SECURITY.md).
+
 ### Firma y verificación
 
 Cada release incluye `SHA256SUMS` (comprobar con `sha256sum -c SHA256SUMS --ignore-missing`) y el

@@ -74,7 +74,18 @@ export const recordOffset = slot => 2 + REC_LEN * slot;
 export const slotName = slot => `${Math.floor(slot / 4) + 1}${"ABCD"[slot % 4]}`;
 const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 export const toHex = b => Array.from(b, v => v.toString(16).padStart(2, "0")).join("");
-export const fromHex = h => Uint8Array.from(h.match(/../g).map(x => parseInt(x, 16)));
+export const fromHex = h => {
+  if (!/^(?:[0-9a-fA-F]{2})*$/.test(h)) throw new Error("Datos hexadecimales no válidos.");
+  return Uint8Array.from(h.match(/../g) || [], x => parseInt(x, 16));
+};
+/** Verified bytes and their maximum (TYPE, IR CAB; model.FIELDS with verified=True): a record out of
+ *  range never reaches the pedal (model.check_writable). */
+export const VERIFIED_MAX = { 5: [8, "TYPE"], 17: [8, "IR CAB"] };
+export function checkRecord(slot, record) {
+  if (record.length !== REC_LEN) throw new DeviceError(`Preset ${slotName(slot)}: el preset debe tener ${REC_LEN} bytes.`);
+  for (const [off, [max, label]] of Object.entries(VERIFIED_MAX))
+    if (record[off] > max) throw new DeviceError(`Preset ${slotName(slot)}: ${label} fuera de rango (${record[off]} > ${max}): el preset no se envía.`);
+}
 
 // bank model -------------------------------------------------------------------------------
 
@@ -148,6 +159,7 @@ export class TankG {
 
   async writePreset(slot, record) {
     if (!(slot >= 0 && slot < SLOTS)) throw new Error("slot out of range");
+    checkRecord(slot, record);
     const frame = build(CLS_WRITE, CMD_READ + 8 * REC_LEN, recordOffset(slot), REC_LEN, SPACE_BANK, record);
     await this.expectAck(frame, `escritura del preset ${slotName(slot)}`);
     await this.expectAck(COMMIT_FRAME, "commit");
@@ -283,6 +295,7 @@ export class TankGBle {
 
   async writePreset(slot, record) {
     if (!(slot >= 0 && slot < SLOTS)) throw new Error("slot out of range");
+    checkRecord(slot, record);
     await this.write(0, recordOffset(slot), Array.from(record), `escritura del preset ${slotName(slot)}`);
     await this.write(SPACE_COMMIT, 0, [], "commit");
   }

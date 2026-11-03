@@ -77,6 +77,31 @@ def test_ui_ai_and_files_match_python(tmp_path):
                                                                                      ["S", None], ["P", None])],
               "setlistDirty": [{"title": "", "songs": [{"slot": "6A", "raw": "00ff", "name": 3}, {"slot": "77", "raw": "x"}, 5]}, 3],
               "setlistClean": setlist.clean([{"title": "", "songs": [{"slot": "6A", "raw": "00ff", "name": 3}, {"slot": "77", "raw": "x"}, 5]}, 3])}
+    from tankg import updater
+    from tankg.model import check_writable
+
+    def _accepts(fn, *a):
+        try:
+            fn(*a)
+            return True
+        except (ValueError, ai.AIError):
+            return False
+    updates = []
+    for body, latest, current in [("Notas\n<!-- tankg-min-version: 1.11.0 -->", "1.11.0", "1.10.2"),
+                                  ("<!--tankg-min-version:v1.11-->", "1.12.0", "1.11.0"),
+                                  ("<!-- tankg-min-version: 1.11.0 -->", "1.12.0", "1.10.9"),
+                                  ("sin marca", "2.0.0", "1.0.0"), ("<!-- tankg-min-version: 3.0.0 -->", "1.0.0", "1.0.0")]:
+        rel = updater.Release(latest, "", None, None, updater.min_version(body))
+        updates.append({"body": body, "latest": latest, "current": current, "min": rel.min_version,
+                        "required": updater.required(rel, current)})
+    raws = [bank.presets[0].to_bytes().hex(), "00" * 5 + "09" + "00" * 15, "00" * 17 + "ff" + "000000", "00" * 20]
+    golden["records"] = [{"raw": r, "ok": len(r) == 42 and _accepts(check_writable, Preset.from_hex(r))} for r in raws]
+    golden["urls"] = [{"url": u, "ok": _accepts(ai.check_url, u)} for u in
+                      ["https://api.anthropic.com", "http://localhost:11434/v1", "http://192.168.1.5:1234/v1", "http://mypc:8080",
+                       "http://evil.com/v1", "file:///etc/passwd", "http://8.8.8.8", "http://10.0.0.2", "http://172.20.1.1",
+                       "http://172.40.1.1", "ftp://x.com"]]
+    golden["updates"] = updates
+    assert [u["required"] for u in updates] == [True, False, True, False, False]
     golden_pack = json.loads(golden["packPy"])
     gfile = tmp_path / "golden.json"
     gfile.write_text(json.dumps(golden, ensure_ascii=False), encoding="utf-8")

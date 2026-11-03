@@ -178,11 +178,32 @@ async function askOpenAI(cfg, prompt, bank, strict = true) {
   catch { throw new AIError("La respuesta del modelo no era un preset JSON válido."); }
 }
 
+/** This computer or the local network (plain http acceptable): same rule as ai.is_local_host. */
+export function isLocalHost(host) {
+  host = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".localhost") || (host && !host.includes(".") && !host.includes(":"))) return true;
+  const v4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  }
+  return host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host);
+}
+
+/** https, or http only on the local network: the key and the prompt never travel in clear text (ai.check_url). */
+export function checkUrl(url) {
+  let u;
+  try { u = new URL(url); } catch { u = null; }
+  if (u && u.hostname && (u.protocol === "https:" || (u.protocol === "http:" && isLocalHost(u.hostname)))) return url;
+  throw new AIError("La URL del servicio de IA debe empezar por https:// (http:// solo para servidores de tu red local).");
+}
+
 /** cfg: {provider, key, model, baseUrl}. Returns {bytes, name, explanation} or {bankName, items}. */
 export async function generate(cfg, description, instrument, bank, likes, amps = {}) {
   const p = AI.providers[cfg.provider];
   cfg = { ...cfg, model: cfg.model || p.model, baseUrl: (cfg.baseUrl || p.url).replace(/\/+$/, "") };
   if (cfg.provider !== "compatible" && !cfg.key) throw new AIError(`Falta la clave de API de ${p.label}.`);
+  checkUrl(cfg.baseUrl);
   const prompt = userPrompt(description, instrument, bank, amps);
   const doc = cfg.provider === "claude" ? await askClaude(cfg, prompt, bank) : await askOpenAI(cfg, prompt, bank);
   return bank ? buildBank(doc, likes) : build(doc, likes[0]);

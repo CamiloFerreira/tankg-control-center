@@ -14,6 +14,30 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
+## Novedades (1.11.0) — actualización de seguridad obligatoria
+
+Esta versión corrige vulnerabilidades encontradas en una revisión de seguridad (ISO/IEC 27001/27002,
+27034 y OWASP MASVS). El detalle completo está en `SECURITY.md` del proyecto; en resumen:
+
+| Gravedad | Qué se corrigió |
+|---|---|
+| Media | **Android 12 o anterior:** otra app instalada podía hacer que Tank-G abriera pantallas arbitrarias, a través del aviso de instalación de actualizaciones. Ahora ese aviso solo lo puede enviar la propia app. |
+| Media | **Linux:** el token de Google Drive y las claves de IA guardadas eran legibles por otros usuarios del equipo. Ahora solo los lee tu usuario (permisos 0600/0700). |
+| Media | Un archivo `.tgpreset`/`.tgset`/`.tgpack` manipulado podía enviar a la pedalera un TYPE o CAB inexistente. Ahora se comprueba antes de escribir. |
+| Media | La clave de API de IA podía viajar sin cifrar (`http://` hacia internet) o reenviarse en una redirección. Ahora solo https (o http dentro de tu red local). |
+| Baja | Android: el puente de la app aceptaba enlaces de cualquier tipo y nombres de archivo con rutas; el WebView no tenía política de contenido (CSP); las descargas de actualización aceptaban redirecciones sin https. |
+| Baja | Archivos mal formados ahora dan un mensaje claro en vez de un error interno; el script de actualización de Windows va en una carpeta temporal privada; CI con permisos mínimos y acciones fijadas a un commit exacto. |
+
+Además, una vulnerabilidad **alta** (escalada a root en la autoactualización del `.deb` de Linux) se
+introdujo y se corrigió durante el desarrollo de esta misma versión; nunca llegó a un release.
+
+**Actualizaciones obligatorias.** Desde esta versión, cuando una actualización corrige algo importante
+de seguridad, las versiones anteriores dejan de funcionar hasta actualizarse: muestran «Actualización
+obligatoria» con «Actualizar» o «Salir». Las versiones 1.10.2 y anteriores no conocen este bloqueo:
+**actualiza a mano esta vez**.
+
+**Instalable para Debian/Ubuntu/Mint** (`TankG-linux-amd64.deb`), que se actualiza solo con apt.
+
 ## Novedades (1.10.2)
 
 - **Estado de conexión real.** Con una Tank-G guardada por Bluetooth, la app decía «conectada» aunque la pedalera

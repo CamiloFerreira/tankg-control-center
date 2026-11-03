@@ -487,6 +487,7 @@ def test_saved_bluetooth_pedal_counts_only_when_it_answers(env, tmp_path, monkey
     library.Settings().set_cloud({"refresh_token": "r", "synced": "x"})
     pushed = []
     monkeypatch.setattr(cloud, "push", lambda drive, doc: pushed.append(doc))
+    monkeypatch.setattr(w, "_drive", lambda: object())   # signed in (CI builds have no OAuth client file)
     w.connected, w._cloud_ready = False, True
     w._cloud_autopush()
     assert not pushed and "pending" in library.Settings().cloud and "Sin pedalera" in w.cloud_label.text()

@@ -11,6 +11,7 @@ import functools
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
@@ -308,11 +309,44 @@ def apply_design(design: dict, like: Preset | None = None) -> Preset:
     return p
 
 
+def is_local_host(host: str) -> bool:
+    """This computer or the local network (where plain http is acceptable): same rule as isLocalHost in ai.js."""
+    import ipaddress
+    host = host.strip("[]").lower()
+    if host == "localhost" or host.endswith(".local") or host.endswith(".localhost") or ("." not in host and ":" not in host and host):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+def check_url(url: str) -> str:
+    """The AI endpoint must be https, or http on this computer / the local network (Ollama, LM Studio):
+    an API key or the prompt must never travel in clear text over the internet."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "https" and parts.hostname:
+        return url
+    if parts.scheme == "http" and parts.hostname and is_local_host(parts.hostname):
+        return url
+    raise AIError("La URL del servicio de IA debe empezar por https:// (http:// solo para servidores de tu red local).")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect would resend the API key to another address: fail instead."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, f"redirección a {newurl} rechazada", headers, fp)
+
+
+_opener = urllib.request.build_opener(_NoRedirect)
+
+
 def _post(url: str, headers: dict, body: dict, timeout: float = 120) -> dict:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+    req = urllib.request.Request(check_url(url), data=json.dumps(body).encode(), method="POST",
                                  headers={"content-type": "application/json", **headers})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _opener.open(req, timeout=timeout) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         try:
@@ -381,7 +415,7 @@ def _build(design: dict, like: Preset | None) -> tuple[Preset, str, str]:
         raise AIError(f"Al preset de la IA le faltan campos: {', '.join(missing)}")
     try:
         preset = apply_design(design, like)
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError, OverflowError) as e:
         raise AIError(f"Valores no válidos en la respuesta de la IA: {e}") from e
     return preset, str(design["name"])[:40], str(design["explanation"])
 
@@ -397,6 +431,7 @@ def _checked(cfg: AIConfig) -> AIConfig:
     cfg = cfg.resolved()
     if cfg.provider != "compatible" and not cfg.api_key:
         raise AIError(f"Falta la clave de API de {PROVIDERS[cfg.provider]['label']}.")
+    check_url(cfg.base_url)
     return cfg
 
 
@@ -518,6 +553,6 @@ def from_text(text: str, like: Preset | None = None) -> tuple[Preset, str, str]:
                       "(el bloque JSON).")
     try:
         preset = apply_design(design, like)
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError, OverflowError) as e:
         raise AIError(f"Valores no válidos en la respuesta de la IA: {e}") from e
     return preset, str(design["name"])[:40], str(design["explanation"])

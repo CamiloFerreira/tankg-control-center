@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import am4, bleproto, sysex
-from .model import AMP_MODELS, BANK_LEN, Bank, Preset, REC_LEN, SLOTS
+from .model import AMP_MODELS, BANK_LEN, Bank, Preset, REC_LEN, SLOTS, check_writable, slot_name
 
 USB_ID = "4c4a:c755"   # generic Jieli id, shared by other M-VAVE pedals
 PORT_NAME = "USB Composite Device"   # MIDI port name of the Jieli chip on every OS
@@ -376,6 +376,13 @@ class RawMidi:
             pass
 
 
+
+def _writable(slot: int, preset: Preset) -> None:
+    try:
+        check_writable(preset)
+    except ValueError as e:
+        raise DeviceError(f"Preset {slot_name(slot)}: {e}.") from e
+
 class TankG:
     def __init__(self, transport, info: DeviceInfo | None = None):
         self.t = transport
@@ -479,6 +486,7 @@ class TankG:
     def write_preset(self, slot: int, preset: Preset) -> None:
         if not 0 <= slot < SLOTS:
             raise ValueError("slot out of range")
+        _writable(slot, preset)
         data = preset.to_bytes()
         frame = sysex.build(sysex.CLS_WRITE, sysex.CMD_READ + 8 * REC_LEN,
                             Bank.record_offset(slot), REC_LEN, SPACE_BANK, data)
@@ -613,6 +621,7 @@ class TankGBle(TankG):
     def write_preset(self, slot: int, preset: Preset) -> None:
         if not 0 <= slot < SLOTS:
             raise ValueError("slot out of range")
+        _writable(slot, preset)
         self.write_mem(bleproto.SPACE_BANK, Bank.record_offset(slot), preset.to_bytes(), f"escritura del preset {slot}")
         self.write_mem(bleproto.SPACE_COMMIT, 0, b"", "commit")
 

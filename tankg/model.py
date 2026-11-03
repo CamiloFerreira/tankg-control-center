@@ -92,6 +92,17 @@ def slot_name(slot: int) -> str:
     return f"{slot // 4 + 1}{'ABCD'[slot % 4]}"
 
 
+def check_writable(preset: "Preset") -> None:
+    """Refuse a record whose verified bytes (TYPE, IR CAB) are out of range before it reaches the
+    pedal: what a damaged or crafted file could carry. Same rule as checkRecord in protocol.js."""
+    raw = preset.raw
+    if len(raw) != REC_LEN:
+        raise ValueError(f"el preset debe tener {REC_LEN} bytes")
+    for f in FIELDS:
+        if f.verified and raw[f.offset] > f.maximum:
+            raise ValueError(f"{f.label} fuera de rango ({raw[f.offset]} > {f.maximum}): el preset no se envía")
+
+
 def parse_slot(text: str) -> int:
     """Accepts '1B', '1b' or a 0-based index '1'."""
     t = text.strip().upper()

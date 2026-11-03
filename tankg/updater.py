@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,21 @@ class Release:
     notes: str
     asset_url: str | None
     sums_url: str | None
+    min_version: str = ""   # versions older than this must update before the app can be used
+
+
+MIN_MARK = re.compile(r"<!--\s*tankg-min-version:\s*v?([0-9]+(?:\.[0-9]+){0,2})\s*-->")
+
+
+def min_version(body: str) -> str:
+    """The minimum version declared by a release (<!-- tankg-min-version: 1.11.0 -->), or ""."""
+    m = MIN_MARK.search(body or "")
+    return m.group(1) if m else ""
+
+
+def required(rel: Release, current: str = __version__) -> bool:
+    """This version is no longer allowed: the update is mandatory (security fixes)."""
+    return bool(rel.min_version) and newer(rel.version, current) and newer(rel.min_version, current)
 
 
 def version_tuple(v: str) -> tuple[int, ...]:
@@ -71,8 +87,10 @@ def _get(url: str, timeout: float = 30) -> bytes:
 def latest() -> Release:
     doc = json.loads(_get(API))
     assets = {a["name"]: a["browser_download_url"] for a in doc.get("assets", [])}
-    notes = str(doc.get("body") or "").split("\n## Verificar")[0].strip()
-    return Release(str(doc.get("tag_name", "")).lstrip("v"), notes, assets.get(ASSET or ""), assets.get("SHA256SUMS"))
+    body = str(doc.get("body") or "")
+    notes = MIN_MARK.sub("", body).split("\n## Verificar")[0].strip()
+    return Release(str(doc.get("tag_name", "")).lstrip("v"), notes, assets.get(ASSET or ""), assets.get("SHA256SUMS"),
+                   min_version(body))
 
 
 def can_self_update() -> bool:
@@ -107,7 +125,7 @@ def install(data: bytes) -> None:
         # A running .exe cannot be overwritten: a small script waits for us to exit, swaps and relaunches.
         new = exe.with_name(exe.stem + ".new.exe")
         new.write_bytes(data)
-        script = Path(tempfile.gettempdir()) / "tankg-update.cmd"
+        script = Path(tempfile.mkdtemp(prefix="tankg-update-")) / "tankg-update.cmd"   # private folder
         script.write_text(
             "@echo off\r\n:wait\r\ntimeout /t 1 /nobreak >nul\r\n"
             f'move /y "{new}" "{exe}" >nul 2>&1 || goto wait\r\n'
@@ -116,17 +134,24 @@ def install(data: bytes) -> None:
                          close_fds=True)
     elif installed_from_deb(str(exe)):
         # Root-owned: apt installs the new package (pkexec asks for the password), then we restart.
-        deb = Path(tempfile.gettempdir()) / DEB_ASSET
-        deb.write_bytes(data)
+        # The verified .deb goes into a new folder only we can write (mkdtemp, 0700; apt reads it as
+        # root): a fixed name in /tmp would let another local user swap the package before apt runs.
+        folder = Path(tempfile.mkdtemp(prefix="tankg-update-"))
+        folder.chmod(0o711)   # apt's unprivileged downloader only needs to reach the file
+        deb = folder / DEB_ASSET
+        with open(deb, "xb") as f:
+            f.write(data)
         deb.chmod(0o644)
         if shutil.which("pkexec") and shutil.which("apt-get"):
-            script = f'pkexec apt-get install -y "{deb}" && rm -f "{deb}"; exec "{exe}"'
-            subprocess.Popen(["sh", "-c", script], start_new_session=True, close_fds=True)
+            subprocess.Popen(["sh", "-c", 'pkexec apt-get install -y "$1"; rm -rf "$2"; exec "$3"', "tankg-update",
+                              str(deb), str(folder), str(exe)], start_new_session=True, close_fds=True)
         else:
             subprocess.Popen(["xdg-open", str(deb)], start_new_session=True, close_fds=True)
     else:
         tmp = exe.with_name(exe.name + ".new")
-        tmp.write_bytes(data)
+        tmp.unlink(missing_ok=True)
+        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700), "wb") as f:   # never through a symlink
+            f.write(data)
         tmp.chmod(0o755)
         os.replace(tmp, exe)   # the running process keeps the old inode; the new file is used from now on
         subprocess.Popen([str(exe), *sys.argv[1:]], start_new_session=True, close_fds=True)

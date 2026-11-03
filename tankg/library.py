@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import setlist
-from .model import Bank, Preset, slot_name
+from .model import SLOTS, Bank, Preset, slot_name
 
 PRESET_FORMAT = "tankg-preset"
 # In a PyInstaller build bundled data files are unpacked under sys._MEIPASS.
@@ -55,6 +55,27 @@ def _write_json(path: Path, doc, ascii_only: bool = False) -> None:
     path.write_text(json.dumps(doc, indent=2, ensure_ascii=ascii_only) + "\n", encoding="utf-8")
 
 
+def private_dir(path: Path) -> Path:
+    """Create the per-user data folder readable only by its owner (0700 on Linux/macOS)."""
+    path.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        try:
+            path.chmod(0o700)
+        except OSError:
+            pass
+    return path
+
+
+def write_private_json(path: Path, doc) -> None:
+    """Atomic write of a file with secrets (OAuth refresh token, AI keys): 0600, never half-written."""
+    private_dir(path.parent)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.unlink(missing_ok=True)
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as f:
+        f.write(json.dumps(doc, indent=2) + "\n")
+    os.replace(tmp, path)
+
+
 def load_bank(path: str | Path) -> Bank:
     return Bank.from_bytes(Path(path).read_bytes())
 
@@ -84,6 +105,11 @@ def save_preset(preset: Preset, path: str | Path, source_slot: int | None = None
     return path
 
 
+def _name(value, limit: int = 60) -> str | None:
+    """An interface name read from a file: text, trimmed, or None."""
+    return str(value).strip()[:limit] or None if isinstance(value, (str, int, float)) and value != "" else None
+
+
 def load_preset(path: str | Path) -> Preset:
     return load_preset_file(path)[0]
 
@@ -92,11 +118,13 @@ def load_preset_file(path: str | Path) -> tuple[Preset, str | None]:
     """The preset and its interface name (None if the file has none)."""
     try:
         doc = _read_json(path)
-    except json.JSONDecodeError as e:
+        if not isinstance(doc, dict):
+            raise ValueError("no es un objeto JSON")
+        if doc.get("format") != PRESET_FORMAT:
+            raise ValueError(f"{path}: formato desconocido {doc.get('format')!r}")
+        return Preset.from_hex(str(doc["raw"])), _name(doc.get("name"))
+    except (KeyError, TypeError, AttributeError, json.JSONDecodeError) as e:
         raise ValueError(f"{path}: no es un archivo .tgpreset válido") from e
-    if doc.get("format") != PRESET_FORMAT:
-        raise ValueError(f"{path}: formato desconocido {doc.get('format')!r}")
-    return Preset.from_hex(doc["raw"]), doc.get("name") or None
 
 
 def backup(bank: Bank, reason: str = "manual") -> Path:
@@ -294,14 +322,17 @@ def save_set(bank: Bank, slots: list[int], path: str | Path, aliases: "Aliases |
 def load_set(path: str | Path) -> tuple[str | None, list[tuple[Preset, str | None]]]:
     try:
         doc = _read_json(path)
-    except json.JSONDecodeError as e:
+        if not isinstance(doc, dict):
+            raise ValueError("no es un objeto JSON")
+        if doc.get("format") != SET_FORMAT:
+            raise ValueError(f"{path}: formato desconocido {doc.get('format')!r}")
+        items = [(Preset.from_hex(str(it["raw"])), _name(it.get("name"))) for it in doc.get("presets", [])[:SLOTS]]
+        title = _name(doc.get("title"))
+    except (KeyError, TypeError, AttributeError, json.JSONDecodeError) as e:
         raise ValueError(f"{path}: no es un archivo .tgset válido") from e
-    if doc.get("format") != SET_FORMAT:
-        raise ValueError(f"{path}: formato desconocido {doc.get('format')!r}")
-    items = [(Preset.from_hex(it["raw"]), it.get("name") or None) for it in doc.get("presets", [])]
     if not items:
         raise ValueError(f"{path}: no contiene presets")
-    return doc.get("title") or None, items
+    return title, items
 
 
 class Settings:
@@ -311,7 +342,8 @@ class Settings:
         self.path = path or SETTINGS_FILE
         self.data: dict = {}
         try:
-            self.data = _read_json(self.path)
+            data = _read_json(self.path)
+            self.data = data if isinstance(data, dict) else {}
         except (OSError, ValueError):
             pass
 
@@ -322,8 +354,7 @@ class Settings:
         return (i, o) if i and o else None
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        _write_json(self.path, self.data)
+        write_private_json(self.path, self.data)
 
     @property
     def ai(self) -> dict:
