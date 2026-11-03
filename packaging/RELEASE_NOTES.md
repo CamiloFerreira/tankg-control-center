@@ -14,6 +14,14 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
+## Novedades (1.11.1)
+
+- **Primera actualización obligatoria.** Con esta versión se prueba el bloqueo de la 1.11.0: al abrirla, la
+  app pide actualizar antes de seguir. No cambia nada más.
+- **Linux (.deb):** si tienes el `.deb` de la 1.10.2 y al actualizar aparece «Permiso denegado:
+  '/opt/tankg/TankG.new'», instala el nuevo a mano una vez: `sudo apt install ./TankG-linux-amd64.deb`.
+  Desde la 1.11.0 el `.deb` se actualiza solo (pide tu contraseña).
+
 ## Novedades (1.11.0) — actualización de seguridad obligatoria
 
 Esta versión corrige vulnerabilidades encontradas en una revisión de seguridad (ISO/IEC 27001/27002,
