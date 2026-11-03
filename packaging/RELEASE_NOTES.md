@@ -17,7 +17,7 @@ No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 ## Novedades (1.11.0) — actualización de seguridad obligatoria
 
 Esta versión corrige vulnerabilidades encontradas en una revisión de seguridad (ISO/IEC 27001/27002,
-27034 y OWASP MASVS). El detalle completo está en `SECURITY.md` del proyecto; en resumen:
+27034 y OWASP MASVS). El detalle completo está en [SECURITY.md](https://github.com/CamiloFerreira/tankg-control-center-releases/blob/main/SECURITY.md); en resumen:
 
 | Gravedad | Qué se corrigió |
 |---|---|
