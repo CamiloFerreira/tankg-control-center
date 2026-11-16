@@ -181,6 +181,21 @@ QLabel#menuState {{ color: {TEXT_MUTED}; font-size: 11px; font-weight: bold; bor
     border-radius: 9px; padding: 1px 8px; }}
 QLabel#menuState[on="true"] {{ color: {OK}; border-color: {ACCENT}; }}
 
+/* tuner (dialogs.TunerDialog) and demo banner (MainWindow) */
+QLabel#tunerNote {{ font-size: 120px; font-weight: bold; color: #f0f0f0; }}
+QLabel#tunerOctave {{ font-size: 34px; font-weight: bold; color: {TEXT_DIM}; }}
+QLabel#tunerState {{ font-size: 19px; font-weight: bold; color: {TEXT_DIM}; }}
+QLabel#tunerState[state="ok"] {{ color: {OK}; }}
+QLabel#tunerState[state="low"], QLabel#tunerState[state="high"] {{ color: {WARN}; }}
+QLabel#tunerString {{ background: {SURFACE}; color: {TEXT_DIM}; border-radius: 8px; padding: 8px 0; font-size: 18px;
+    font-weight: bold; }}
+QLabel#tunerString[on="true"] {{ background: {TEAL}; color: #ffffff; }}
+QLabel#tunerString[ok="true"] {{ background: {ACCENT}; color: #ffffff; }}
+QLabel#tempoBpm {{ font-size: 96px; font-weight: bold; color: #f0f0f0; }}
+QLabel#tempoMark {{ font-size: 18px; font-weight: bold; color: {TEXT_DIM}; }}
+QFrame#demoBanner {{ background: #3b3410; border: 1px solid #6b5a14; border-radius: 10px; }}
+QLabel#demoText {{ color: {WARN}; font-weight: bold; }}
+
 QMessageBox, QInputDialog {{ background: {SURFACE}; }}
 QMessageBox QLabel, QInputDialog QLabel {{ color: {TEXT}; }}
 QMessageBox QPushButton, QInputDialog QPushButton, QDialogButtonBox QPushButton {{ min-width: 84px; }}

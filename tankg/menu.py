@@ -46,6 +46,9 @@ ICONS = {
     "search": "<circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"M20 20l-3.5-3.5\"/>",
     "setlist": "<path d=\"M4 6h10M4 12h10M4 18h6\"/><path d=\"M18 18V7l3-1\"/><circle cx=\"16\" cy=\"18\" r=\"2\"/>",
     "pedal": "<rect x=\"4\" y=\"3\" width=\"16\" height=\"18\" rx=\"3\"/><circle cx=\"12\" cy=\"15\" r=\"3\"/><path d=\"M8 7h8\"/>",
+    "tuner": "<path d=\"M3.5 17a9 9 0 1 1 17 0\"/><path d=\"M12 17l4-6\"/><path d=\"M12 5v2M5.6 7.6l1.4 1.4M18.4 7.6L17 9\"/>",
+    "tempo": "<path d=\"M6.5 21L9.5 3h5l3 18z\"/><path d=\"M12 16l5-9\"/><path d=\"M8 16h8\"/>",
+    "bug": "<rect x=\"8\" y=\"6\" width=\"8\" height=\"14\" rx=\"4\"/><path d=\"M12 10v10M4 13h4M16 13h4M5 7l3 2M19 7l-3 2M5 20l3-2.5M19 20l-3-2.5\"/>",
 }
 
 # (title, icon, [(command, label, description, icon, search keywords), ...])
@@ -57,6 +60,9 @@ MENU = [
         ("activate", "Activar este preset", "Lo hace sonar en la pedalera", "play", "seleccionar sonar"),
         ("live", "Escucha en vivo", "Cada cambio suena al momento en la pedalera", "live", "audicion tiempo real"),
         ("port", "Puerto MIDI / Bluetooth…", "Elige la pedalera si no se conecta sola", "plug", "conectar usb bluetooth"),
+        ("tuner", "Afinador", "Cromático o por afinación (Drop D, Eb, bajo…)", "tuner",
+         "afinar cuerdas nota guitarra bajo microfono drop open dadgad cromatico"),
+        ("tempo", "Metrónomo y tap tempo", "Pulso, compás y tiempos de delay en ms", "tempo", "bpm metronomo pulso click delay compas"),
     ]),
     ("Editar", "rename", [
         ("undo", "Deshacer", "Vuelve atrás el último cambio", "undo", ""),
@@ -110,16 +116,21 @@ MENU = [
     ]),
     ("App", "sliders", [
         ("view", "Vista: automática", "Teléfono, tablet o automática", "layout", "pantalla tablet"),
-        ("demo", "Modo demo (sin pedalera)", "Prueba la app con presets de ejemplo", "demo", ""),
+        ("demo", "Modo demo (sin pedalera)", "Prueba la app con una pedalera simulada", "demo", "probar ejemplo salir"),
         ("calibrate", "Asistente de calibración…", "Confirma qué byte guarda cada perilla", "sliders", ""),
         ("update", "Buscar actualizaciones", "Descarga e instala la última versión", "update", "version"),
         ("bytes", "Bytes del preset", "Los 21 bytes del preset seleccionado", "code", ""),
         ("about", "Acerca de", "Versión, privacidad y condiciones", "info", "privacidad"),
     ]),
+    ("Ayuda", "bug", [
+        ("diag", "Copiar diagnóstico", "Versión, conexión y últimos errores, para un reporte", "copy", "error problema soporte"),
+        ("log", "Guardar registro de la sesión", "Lo que pasó desde que abriste la app, en un .txt", "export", "log errores"),
+        ("report", "Reportar un problema…", "Abre un reporte en GitHub con el diagnóstico", "bug", "error fallo issue github soporte"),
+    ]),
 ]
 QUICK = ["read", "saveAll", "activate", "live", "library", "ai"]
 QUICK_LABEL = {"read": "Leer", "saveAll": "Guardar", "activate": "Activar", "live": "En vivo", "library": "Biblioteca", "ai": "Crear con IA"}
-ANDROID_ONLY = {"view", "demo"}   # phone/tablet layout, demo pedal
+ANDROID_ONLY = {"view"}   # phone/tablet layout
 
 
 def fold(text: str) -> str:

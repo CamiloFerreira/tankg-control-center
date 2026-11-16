@@ -14,6 +14,23 @@ Gestor de presets para la pedalera M-VAVE Tank-G: Linux, Windows y **Android** (
 
 No necesita Python ni drivers: la Tank-G es USB-MIDI class-compliant.
 
+## Novedades (1.12.0)
+
+- **Afinador** (Windows, Linux y Android). Cromático, o con una afinación de la lista: estándar, medio tono y
+  un tono abajo, Drop D/C#/C/B, C estándar, DADGAD, Open G/D/E, 7 cuerdas y bajo de 4 y 5 cuerdas. Con una
+  afinación elegida te dice hacia qué cuerda ir aunque estés lejos (en Drop D, la 6.ª en Mi marca «D2 · Alta:
+  afloja la cuerda»). Escucha el micrófono o la propia Tank-G por USB (también es tarjeta de sonido). Solo
+  escucha mientras está abierto: no graba ni envía nada. En Android pide el permiso de micrófono la primera vez.
+- **Metrónomo y tap tempo.** BPM de 30 a 300, compases con acento (4/4, 3/4, 6/8…), pulsos visuales y los
+  **tiempos de delay en ms** para ese tempo (negra, corchea con puntillo, corchea…), para ajustar a oído el DLY
+  TIME de la pedalera.
+- **Accesos rápidos** a Crear con IA, Afinador y Metrónomo: iconos arriba en el teléfono, en la barra de
+  herramientas en tablet y en escritorio (Ctrl+T afinador, Ctrl+M metrónomo).
+- **Modo demo también en Windows y Linux:** prueba la app con una pedalera simulada (nueve bancos de la
+  biblioteca). No toca tu pedalera, tus backups, la nube ni tus nombres; el mismo comando del menú sale del demo.
+- **Ayuda → Copiar diagnóstico, Guardar registro de la sesión y Reportar un problema**: abre un reporte en
+  GitHub con la versión, la conexión y los últimos errores, sin nombres de presets ni datos personales.
+
 ## Novedades (1.11.1)
 
 - **Primera actualización obligatoria.** Con esta versión se prueba el bloqueo de la 1.11.0: al abrirla, la

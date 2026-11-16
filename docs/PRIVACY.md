@@ -4,7 +4,7 @@ title: Política de privacidad
 
 # Política de privacidad — Tank-G Control Center
 
-Última actualización: 27 de octubre de 2026
+Última actualización: 15 de noviembre de 2026
 
 Tank-G Control Center («la app») es un editor de presets gratuito y de código abierto para la
 pedalera M-VAVE Tank-G, disponible para Linux, Windows y Android. Lo desarrolla un particular,
@@ -22,6 +22,16 @@ activas, en tu propio Google Drive.
   el almacenamiento privado de la app. Al desinstalar la app o borrar esa carpeta, desaparecen.
 - La app se comunica con la pedalera por USB o Bluetooth. Esa comunicación es local y no sale
   de tu equipo.
+- **Afinador:** mientras está abierto escucha el micrófono, o la entrada de audio que elijas (por
+  ejemplo, la propia Tank-G por USB), para calcular la nota. El sonido se analiza en el momento y no
+  se graba, no se guarda y no se envía a ningún sitio. Al cerrar el afinador, la app deja de escuchar.
+  El metrónomo solo reproduce sonido y no usa el micrófono.
+- **Diagnóstico y reportes:** la app lleva un registro breve de lo que pasa en la sesión (conexiones,
+  lecturas, escrituras y errores), solo en memoria. Sale de tu equipo únicamente si tú usas «Copiar
+  diagnóstico», «Guardar registro» o «Reportar un problema». Contiene la versión, el sistema, cómo
+  está conectada la pedalera y los últimos errores; nunca nombres de presets, archivos, la sesión de
+  Google ni claves, y oculta correos y la carpeta de usuario. «Reportar un problema» abre GitHub en
+  tu navegador con el texto ya escrito: no se envía nada hasta que tú lo publicas.
 
 ## 2. Sincronización con Google Drive (opcional)
 
@@ -69,6 +79,8 @@ privacidad.
   pedalera. No se usan para conocer tu ubicación.
 - **Internet:** para Google Drive, la IA y las actualizaciones, como se explica arriba.
 - **Instalar paquetes:** para instalar las actualizaciones de la app cuando tú lo confirmas.
+- **Micrófono:** solo para el afinador, y solo mientras está abierto (ver el apartado 1). Android lo
+  pide la primera vez que lo abres; puedes negarlo y el resto de la app funciona igual.
 
 ## 6. Menores
 
@@ -101,5 +113,11 @@ can revoke access at <https://myaccount.google.com/permissions>.
 own API key, which is stored locally.
 
 **Update checks** contact GitHub.
+
+**Tuner:** while it is open it listens to the microphone (or the audio input you choose) to find the
+note. The sound is analysed on the fly and never recorded, stored or sent.
+
+**Diagnostics** (a short session log kept in memory) leave your device only when you copy, save or
+report them; they hold no preset names, files, Google session or keys.
 
 Contact: <https://github.com/CamiloFerreira/tankg-control-center/issues>.

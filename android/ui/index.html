@@ -15,15 +15,23 @@
 <header class="top">
   <div class="brand"><img class="app-icon" src="img/icon.svg" alt=""><span class="logo">TANK-G</span><span class="sub">Control Center</span></div>
   <nav class="toolbar" aria-label="Acciones">
-    <button id="tbRead" class="tb">Leer pedalera</button>
+    <button id="tbRead" class="tb" title="Leer pedalera">Leer pedalera</button>
     <button id="tbSave" class="tb primary">Guardar cambios</button>
-    <button id="tbUndo" class="tb">Deshacer</button>
+    <button id="tbUndo" class="tb" title="Deshacer">Deshacer</button>
     <span class="tsep"></span>
-    <button id="tbLib" class="tb accent">Biblioteca de sonidos</button>
-    <button id="tbSet" class="tb accent">Setlists</button>
+    <button id="tbLib" class="tb accent" title="Biblioteca de sonidos">Biblioteca de sonidos</button>
+    <button id="tbSet" class="tb accent" title="Setlists">Setlists</button>
+    <button id="tbAI" class="tb accent" title="Crear con IA">Crear con IA</button>
+    <span class="tsep"></span>
+    <button id="tbTuner" class="tb only-icon" title="Afinador" aria-label="Afinador">Afinador</button>
+    <button id="tbTempo" class="tb only-icon" title="Metrónomo" aria-label="Metrónomo">Metrónomo</button>
   </nav>
   <span id="status" class="pill off">Desconectada</span>
   <button id="connect" class="btn primary small">Conectar</button>
+  <!-- phone view: quick access to AI, the tuner and the metronome (tablets: tbAI, tbTuner, tbTempo in the toolbar) -->
+  <button id="qAI" class="icon quick-tool ai" aria-label="Crear con IA" title="Crear con IA"></button>
+  <button id="qTuner" class="icon quick-tool" aria-label="Afinador" title="Afinador"></button>
+  <button id="qTempo" class="icon quick-tool" aria-label="Metrónomo" title="Metrónomo"></button>
   <button id="menuBtn" class="icon" aria-label="Menú">⋮</button>
 </header>
 
@@ -216,6 +224,43 @@
     <h3 class="step">3 · Leer cambios</h3>
     <button id="calRead" class="btn primary" disabled>Leer cambios</button>
     <pre id="calLog" class="log">Los cambios detectados aparecerán aquí.</pre>
+  </div>
+</div>
+
+<!-- tuner (desktop TunerDialog): microphone or the pedal's USB audio; nothing is recorded or sent -->
+<div id="tunSheet" class="sheet" hidden>
+  <div class="sheet-head"><button class="icon" data-close aria-label="Cerrar">←</button><h2>Afinador</h2></div>
+  <div class="sheet-body tuner">
+    <div class="tun-note"><span id="tunName">–</span><sub id="tunOct"></sub></div>
+    <div id="tunState" class="tun-state"></div>
+    <div class="tun-meter"><div class="tun-zone"></div><div class="tun-center"></div><div id="tunNeedle" class="tun-needle" hidden></div></div>
+    <div class="tun-scale"><span>♭ −50</span><span>−25</span><span>0</span><span>+25</span><span>+50 ♯</span></div>
+    <div id="tunStrings" class="tun-strings"></div>
+    <p class="tun-info"><span id="tunHz">— Hz</span><span id="tunHeard"></span><span id="tunLevel"></span></p>
+    <div class="tun-opts">
+      <label>Afinación <select id="tunTuning"></select></label>
+      <label>Entrada <select id="tunInput"><option value="">Micrófono</option></select></label>
+      <label>La (A4) <input id="tunA4" type="number" inputmode="numeric" min="430" max="450" step="1"> Hz</label>
+    </div>
+    <p id="tunMsg" class="muted"></p>
+  </div>
+</div>
+
+<!-- metronome and tap tempo (desktop MetronomeDialog) -->
+<div id="tmpSheet" class="sheet" hidden>
+  <div class="sheet-head"><button class="icon" data-close aria-label="Cerrar">←</button><h2>Metrónomo</h2></div>
+  <div class="sheet-body tempo">
+    <div class="tmp-bpm"><span id="tmpBpm">120</span><small>BPM</small></div>
+    <div id="tmpMark" class="tmp-mark"></div>
+    <div id="tmpBeats" class="tmp-beats"></div>
+    <input id="tmpRange" class="tmp-range" type="range" step="1" aria-label="BPM">
+    <div class="tmp-steps"><button class="btn" data-step="-5">−5</button><button class="btn" data-step="-1">−1</button>
+      <button class="btn" data-step="1">+1</button><button class="btn" data-step="5">+5</button></div>
+    <div class="tmp-main"><button id="tmpTap" class="btn tmp-tap">TAP</button><button id="tmpPlay" class="btn primary tmp-play">▶ Iniciar</button></div>
+    <label class="tmp-meter">Compás <select id="tmpMeter"></select></label>
+    <h3 class="step">Delay a tempo</h3>
+    <div id="tmpDelay" class="tmp-delay"></div>
+    <p id="tmpHint" class="muted"></p>
   </div>
 </div>
 

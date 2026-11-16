@@ -2,8 +2,8 @@
 // `device` = last bank read from the pedal, `local` = working copy; "modified" = slots that
 // differ. Every write takes a backup first (once per session), writes only changed slots and
 // verifies by read-back.
-import { AI, AMP_MODELS, BAND_PACKS, BYTE_NAMES, CAB_MODELS, DEFAULT_FACTORY_SET, FACTORY, FACTORY_AMPCAB, FACTORY_NAMES, FACTORY_SETS, FIELDS, ICONS, LEGAL, LIBRARY, MENU, QUICK, QUICK_LABEL,
-  RELEASES_REPO, VERSION } from "./data.js";
+import { AI, AMP_MODELS, BAND_PACKS, BYTE_NAMES, CAB_MODELS, DEFAULT_FACTORY_SET, DEMO_BANKS, FACTORY, FACTORY_AMPCAB, FACTORY_NAMES, FACTORY_SETS, FIELDS, ICONS, LEGAL,
+  LIBRARY, MENU, QUICK, QUICK_LABEL, RELEASES_REPO, TEMPO, TUNER, VERSION } from "./data.js";
 import { Bank, DeviceError, SLOTS, TankG, androidBluetoothPedals, fakePedal, fromHex, midiAccess, openMidi, slotName, toHex } from "./protocol.js";
 import { fromText as aiFromText, generate as generateAI, webPrompt, zoneGap } from "./ai.js";
 import { PACK_EXTENSION, communityKey, communityUrl, creditText, fromBase64, packFile, parseBankFile, parsePackFile, parsePresetFile,
@@ -12,6 +12,9 @@ import * as cloud from "./cloud.js";
 import * as am4 from "./am4.js";
 import * as setlist from "./setlist.js";
 import { minVersion, newer, updateRequired } from "./update.js";
+import * as diag from "./diag.js";
+import * as tuner from "./tuner.js";
+import * as tempo from "./tempo.js";
 
 const $ = id => document.getElementById(id);
 const F = Object.fromEntries(FIELDS.map(f => [f.key, f]));
@@ -24,8 +27,6 @@ const MODULES = [
   { title: "REVERB", cls: "m-rvb", c: "--rvb", sw: "rvb_on", faders: ["rvb_decay", "rvb_mix"] },
   { title: "CAB", cls: "m-cab", c: "--gate", select: "cab", faders: [] },
 ];
-const DEMO_BANKS = ["Guitarra eléctrica", "Metallica", "Iron Maiden", "AC/DC", "Blind Guardian", "Korn",
-  "Bajo limpio", "Guitarra clásica (nylon)", "Strato: limpios"];
 
 const A = globalThis.AndroidMidi;   // native bridge of MainActivity (MIDI, Bluetooth, files, updates)
 const S = { dev: null, demo: false, device: null, local: null, current: 0, undo: [], busy: false,
@@ -381,6 +382,7 @@ function ask(title, text, ok = "Sí") {
 }
 
 function info(title, text) {
+  if (/error|no se pudo|falló/i.test(title)) diag.error(`${title}: ${text}`);
   modal({ title, step: text });
   $("mClose").onclick = closeModal;
 }
@@ -400,10 +402,13 @@ async function connect(silent = false) {
     loadAliases();
     watchPorts(dev.access);
     adoptBank(dev.bank, fromDemo);
+    diag.log(`Conectada: ${S.dev.portName}`);
     toast(`Tank-G conectada (${S.dev.portName})`);
     setTimeout(cloudStartup, 500);
   } catch (e) {
     S.dev = null;
+    if (silent) diag.log(`Sin pedalera: ${e.message}`);
+    else if (!S.local) diag.error(`Conectar: ${e.message}`);   // with the editor open, info() below logs it
     if (!silent) {
       // Connect by itself as soon as the pedal is plugged in (permission is already granted).
       S.wanted = true;
@@ -465,6 +470,7 @@ function watchPorts(access) {
   access.onstatechange = e => {
     if (S.demo) return;
     if (e.port.state === "disconnected" && S.dev && e.port.name === S.dev.portName) {
+      diag.log("Desconectada");
       S.dev = null;
       render();
       toast("Tank-G desconectada");
@@ -496,7 +502,24 @@ function startDemo() {
   S.undo = [];
   S.current = 0;
   render();
-  toast("Modo demo: una pedalera simulada, nada sale del teléfono");
+  diag.log("Modo demo");
+  toast("Modo demo: una pedalera simulada, nada sale del teléfono. Menú → Modo demo para salir.", 5000);
+}
+
+/** Leaves the demo: back to the start screen (or straight to the pedal when it is connected). */
+async function exitDemo() {
+  if (!S.demo) return;
+  if (modified().length && !(await ask("Salir del modo demo", "Los cambios hechos en la pedalera simulada se descartan. ¿Salir?"))) return;
+  S.demo = false;
+  S.dev = null;
+  S.device = S.local = null;
+  S.undo = [];
+  S.live = false;
+  loadAliases();
+  diag.log("Fin del modo demo");
+  render();
+  toast("Modo demo cerrado");
+  connect(true);
 }
 
 async function readDevice() {
@@ -557,6 +580,7 @@ async function upload(slots, selectSlot = null) {
     mark(total);
     $("mBar").firstElementChild.style.width = "100%";
     step(`✓ ${total} preset${total > 1 ? "s" : ""} guardado${total > 1 ? "s" : ""} y verificado${total > 1 ? "s" : ""}`, "ok");
+    diag.log(`Guardados y verificados: ${slots.map(slotName).join(" ")}`);
     $("mClose").onclick = closeModal;
     setTimeout(() => { if ($("mStep").className === "ok") closeModal(); }, 1500);
     return true;
@@ -1901,10 +1925,13 @@ async function cloudHistory() {
 const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const icon = name => `<svg class="ic" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 /** Toolbar and bottom bar buttons: a line icon of the menu (tankg/menu.py) and their label. */
-const BAR_ICONS = { tbRead: "refresh", tbSave: "save", tbUndo: "undo", tbLib: "library", tbSet: "setlist",
+const BAR_ICONS = { tbRead: "refresh", tbSave: "save", tbUndo: "undo", tbLib: "library", tbSet: "setlist", tbAI: "ai", tbTuner: "tuner", tbTempo: "tempo",
   undo: "undo", library: "library", setlists: "setlist", save: "save" };
 const setLabel = (b, text) => { (b.querySelector("span") || b).textContent = text; };
 function barIcons() {
+  $("qAI").innerHTML = icon("ai");
+  $("qTuner").innerHTML = icon("tuner");
+  $("qTempo").innerHTML = icon("tempo");
   for (const [id, name] of Object.entries(BAR_ICONS)) $(id).innerHTML = `${icon(name)}<span>${$(id).textContent}</span>`;
   for (const el of document.querySelectorAll("[data-icon]")) el.insertAdjacentHTML("afterbegin", `<i class="disc">${icon(el.dataset.icon)}</i>`);
 }
@@ -1937,6 +1964,9 @@ function menuState() {
     if (c.startsWith("cloud")) b.hidden = (c === "cloudConnect") === cloudOn;
   }
   for (const b of $("menuBody").querySelectorAll('[data-cmd="live"]')) b.classList.toggle("on", S.live);
+  const demo = $("menuBody").querySelector('.card [data-cmd="demo"]');
+  demo.querySelector("b").textContent = S.demo ? "Salir del modo demo" : "Modo demo (sin pedalera)";
+  demo.querySelector("small").textContent = S.demo ? "Vuelve a la pedalera real" : "Prueba la app con una pedalera simulada";
   const read = $("menuBody").querySelector('.card [data-cmd="read"]');   // without a pedal, «Leer» connects
   read.querySelector("b").textContent = dev ? "Leer presets" : "Conectar y leer";
   read.querySelector("small").textContent = dev ? "Trae los 36 presets de la pedalera" : "USB-OTG o Bluetooth (Tank-G v2)";
@@ -1969,11 +1999,243 @@ function openMenu() {
   if (document.body.classList.contains("tablet")) $("menuSearch").focus();   // phones: no keyboard popping up
 }
 
+// diagnostics (desktop: MainWindow.diag_report) --------------------------------------------------
+
+function diagReport() {
+  const ua = navigator.userAgent;
+  const android = ua.match(/Android ([\d.]+)/)?.[1], webview = ua.match(/Chrome\/([\d.]+)/)?.[1];
+  const platform = [android ? `Android ${android}` : navigator.platform, webview && `WebView ${webview}`,
+    A?.version ? "APK" : "navegador"].filter(Boolean).join(" · ");
+  return diag.report({
+    version: appVersion(), platform,
+    pedal: S.demo ? "simulada (modo demo)" : S.dev ? `conectada (${S.dev.bluetooth ? "Bluetooth" : "USB"})` : "desconectada",
+    port: S.dev && !S.demo ? S.dev.portName : "", demo: S.demo, modified: S.local && S.device ? modified().length : 0,
+    cloud: !!cloudState().refreshToken, backups: store.get("tankg.backups", []).length,
+    errors: diag.errors(), log: diag.lines(),
+  });
+}
+
+// tuner (desktop dialogs.TunerDialog): microphone or the pedal's USB audio, only while on screen -----
+
+const TU = { stream: null, ctx: null, timer: null, last: [], miss: 0 };
+
+function openTuner() {
+  $("tunA4").value = tunerA4();
+  $("tunTuning").innerHTML = TUNER.tunings.map(([name], i) => `<option value="${i}">${name}</option>`).join("");
+  $("tunTuning").value = tunerTuning();
+  tunerStrings();
+  tunerClear();
+  $("tunSheet").hidden = false;
+  startTuner(store.get("tankg.tunerInput", ""));
+}
+
+function tunerTuning() {
+  const t = Number(store.get("tankg.tunerTuning", 0));
+  return TUNER.tunings[t] ? t : 0;
+}
+
+/** The strings of the chosen tuning (none when chromatic). */
+function tunerStrings() {
+  const strings = TUNER.tunings[tunerTuning()][1];
+  $("tunStrings").innerHTML = strings.map(m => `<span>${tuner.noteName(m)}</span>`).join("");
+  $("tunStrings").hidden = !strings.length;
+  $("tunStrings").style.gridTemplateColumns = `repeat(${strings.length || 1}, 1fr)`;
+}
+
+function tunerA4() {
+  const v = Math.round(Number(store.get("tankg.tunerA4", 440)));
+  return Math.min(TUNER.a4Range[1], Math.max(TUNER.a4Range[0], Number.isFinite(v) ? v : 440));
+}
+
+function stopTuner() {
+  clearInterval(TU.timer);
+  TU.timer = null;
+  TU.stream?.getTracks().forEach(t => t.stop());
+  TU.stream = null;
+  TU.ctx?.close().catch(() => {});
+  TU.ctx = null;
+}
+
+async function startTuner(deviceId) {
+  stopTuner();
+  $("tunMsg").textContent = TUNER.privacy;
+  if (!navigator.mediaDevices?.getUserMedia) { $("tunMsg").textContent = "Este equipo no deja usar el micrófono desde la app."; return; }
+  let stream;
+  try {
+    const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    if (deviceId) audio.deviceId = { exact: deviceId };
+    stream = await navigator.mediaDevices.getUserMedia({ audio });
+  } catch (e) {
+    if (deviceId) { store.set("tankg.tunerInput", ""); return startTuner(""); }   // the saved input is gone: default one
+    diag.error(`Afinador: ${e.name || ""} ${e.message || ""}`);
+    $("tunMsg").textContent = "Sin acceso al micrófono. Permítelo en Ajustes de Android → Apps → Tank-G → Permisos → Micrófono, y vuelve a abrir el afinador.";
+    return;
+  }
+  if ($("tunSheet").hidden || document.hidden) { stream.getTracks().forEach(t => t.stop()); return; }   // closed meanwhile
+  stopTuner();
+  TU.stream = stream;
+  TU.ctx = new AudioContext();
+  TU.ctx.resume().catch(() => {});
+  const analyser = TU.ctx.createAnalyser();
+  analyser.fftSize = TUNER.frame;
+  const mute = TU.ctx.createGain();
+  mute.gain.value = 0;   // keeps the graph running without playing anything
+  TU.ctx.createMediaStreamSource(stream).connect(analyser);
+  analyser.connect(mute).connect(TU.ctx.destination);
+  const buf = new Float32Array(analyser.fftSize);
+  TU.timer = setInterval(() => {
+    if ($("tunSheet").hidden) return stopTuner();
+    analyser.getFloatTimeDomainData(buf);
+    tunerShow(tuner.detect(buf, TU.ctx.sampleRate), tuner.level(buf));
+  }, 100);
+  tunerInputs(stream.getAudioTracks()[0]?.getSettings().deviceId || "");
+  diag.log("Afinador abierto");
+}
+
+async function tunerInputs(current) {
+  const sel = $("tunInput");
+  try {
+    const inputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput");
+    sel.innerHTML = "";
+    inputs.forEach((d, i) => sel.add(new Option(d.label || `Entrada ${i + 1}`, d.deviceId)));
+    if (!inputs.length) sel.add(new Option("Micrófono", ""));
+    sel.value = inputs.some(d => d.deviceId === current) ? current : sel.options[0].value;
+  } catch { /* the list is optional */ }
+}
+
+function tunerClear() {
+  TU.last = [];
+  TU.miss = 0;
+  $("tunName").textContent = "–";
+  $("tunOct").textContent = "";
+  $("tunHz").textContent = "— Hz";
+  $("tunHeard").textContent = "";
+  $("tunState").textContent = TUNER.waiting;
+  $("tunState").className = "tun-state";
+  $("tunNeedle").hidden = true;
+  for (const s of $("tunStrings").children) s.className = "";
+}
+
+function tunerShow(freq, lvl) {
+  $("tunLevel").textContent = `entrada ${Math.round(lvl)} dB`;
+  if (freq === null) { if (++TU.miss > 8) tunerClear(); return; }   // keep the last note for a moment
+  TU.miss = 0;
+  TU.last = [...TU.last.slice(-2), freq];
+  const f = [...TU.last].sort((a, b) => a - b)[Math.floor(TU.last.length / 2)];   // median of the last three
+  const r = tuner.reading(f, tunerTuning(), tunerA4()), st = r.state, string = r.string;
+  $("tunName").textContent = r.name;
+  $("tunOct").textContent = r.octave;
+  $("tunHz").textContent = `${f.toFixed(2)} Hz`;
+  $("tunHeard").textContent = string >= 0 ? `suena ${r.heard}` : "";
+  $("tunState").textContent = `${TUNER.stateText[st]}${st === "ok" ? "" : ` (${r.cents > 0 ? "+" : ""}${Math.round(r.cents)} cents)`}`;
+  $("tunState").className = `tun-state ${st}`;
+  $("tunNeedle").hidden = false;
+  $("tunNeedle").style.left = `${50 + Math.max(-50, Math.min(50, r.cents))}%`;
+  $("tunNeedle").className = `tun-needle ${st}`;
+  [...$("tunStrings").children].forEach((s, i) => { s.className = i === string ? `on ${st}` : ""; });
+}
+
+// metronome and tap tempo (desktop dialogs.MetronomeDialog): clicks scheduled ahead with Web Audio ------
+
+const MT = { ctx: null, timer: null, raf: 0, next: 0, beat: 0, queue: [], lit: null, taps: [], bpm: TEMPO.defaultBpm, meter: 0 };
+
+function openTempo() {
+  const saved = store.get("tankg.tempo", {});
+  MT.bpm = tempo.clamp(Number(saved.bpm) || TEMPO.defaultBpm);
+  MT.meter = TEMPO.meters[saved.meter] ? Number(saved.meter) : 0;
+  $("tmpMeter").innerHTML = TEMPO.meters.map(([name], i) => `<option value="${i}">${name}</option>`).join("");
+  $("tmpMeter").value = MT.meter;
+  $("tmpRange").min = TEMPO.bpmRange[0];
+  $("tmpRange").max = TEMPO.bpmRange[1];
+  $("tmpHint").textContent = TEMPO.delayHint;
+  MT.taps = [];
+  tempoShow();
+  $("tmpSheet").hidden = false;
+}
+
+function tempoSet(bpm, meter = MT.meter) {
+  MT.bpm = tempo.clamp(bpm);
+  MT.meter = meter;
+  MT.beat %= TEMPO.meters[meter][1];
+  store.set("tankg.tempo", { bpm: MT.bpm, meter });
+  tempoShow();
+}
+
+function tempoShow() {
+  const beats = TEMPO.meters[MT.meter][1];
+  $("tmpBpm").textContent = MT.bpm;
+  $("tmpMark").textContent = tempo.marking(MT.bpm);
+  $("tmpRange").value = MT.bpm;
+  if ($("tmpBeats").childElementCount !== beats)
+    $("tmpBeats").innerHTML = Array.from({ length: beats }, (_, i) => `<i class="${i === 0 && beats > 1 ? "accent" : ""}"></i>`).join("");
+  $("tmpDelay").innerHTML = tempo.delayTimes(MT.bpm).map(([name, ms]) => `<span>${name}</span><b>${ms} ms</b>`).join("");
+}
+
+function tempoStart() {
+  tempoStop();
+  MT.ctx = new AudioContext();
+  MT.ctx.resume().catch(() => {});
+  MT.next = MT.ctx.currentTime + 0.08;
+  MT.beat = 0;
+  MT.queue = [];
+  MT.timer = setInterval(tempoSchedule, 25);
+  tempoSchedule();
+  MT.raf = requestAnimationFrame(tempoDraw);
+  A?.keepAwake?.(true);
+  $("tmpPlay").textContent = "■ Parar";
+  diag.log(`Metrónomo: ${MT.bpm} BPM ${TEMPO.meters[MT.meter][0]}`);
+}
+
+function tempoStop() {
+  if (!MT.ctx) return;
+  clearInterval(MT.timer);
+  cancelAnimationFrame(MT.raf);
+  MT.ctx.close().catch(() => {});
+  MT.ctx = null;
+  MT.lit = null;
+  if ($("stage").hidden) A?.keepAwake?.(false);
+  for (const d of $("tmpBeats").children) d.classList.remove("on");
+  $("tmpPlay").textContent = "▶ Iniciar";
+}
+
+function tempoSchedule() {
+  if ($("tmpSheet").hidden) return tempoStop();
+  const beats = TEMPO.meters[MT.meter][1];
+  while (MT.next < MT.ctx.currentTime + 0.12) {
+    const accent = MT.beat === 0 && beats > 1;
+    const osc = MT.ctx.createOscillator(), gain = MT.ctx.createGain(), end = MT.next + TEMPO.click.ms / 1000;
+    osc.frequency.value = accent ? TEMPO.click.accentHz : TEMPO.click.hz;
+    gain.gain.setValueAtTime(accent ? 0.8 : 0.55, MT.next);
+    gain.gain.exponentialRampToValueAtTime(0.001, end);
+    osc.connect(gain).connect(MT.ctx.destination);
+    osc.start(MT.next);
+    osc.stop(end + 0.005);
+    MT.queue.push([MT.next, MT.beat]);
+    MT.next += 60 / MT.bpm;
+    MT.beat = (MT.beat + 1) % beats;
+  }
+}
+
+function tempoDraw() {
+  if (!MT.ctx) return;
+  const now = MT.ctx.currentTime;
+  while (MT.queue.length && MT.queue[0][0] <= now) MT.lit = MT.queue.shift();
+  [...$("tmpBeats").children].forEach((d, i) => d.classList.toggle("on", !!MT.lit && MT.lit[1] === i && now - MT.lit[0] < 0.15));
+  MT.raf = requestAnimationFrame(tempoDraw);
+}
+
+function tempoTap() {
+  MT.taps = [...MT.taps.slice(-11), performance.now() / 1000];
+  const bpm = tempo.tap(MT.taps);
+  if (bpm) tempoSet(bpm);
+}
+
 // command dispatcher: menu sheet, preset long-press menu and toolbar share it --------------------
 
 async function run(cmd) {
   $("menuSheet").hidden = true;
-  const needLocal = !["read", "demo", "about", "view", "port", "ampUpload", "factoryAmpCab", "importPack", "bandPacks", "downloadAmps", "update", "calibrate", "backups", "cloudConnect", "cloudDisconnect"].includes(cmd);
+  const needLocal = !["read", "demo", "about", "view", "port", "ampUpload", "factoryAmpCab", "importPack", "bandPacks", "downloadAmps", "update", "calibrate", "backups", "cloudConnect", "cloudDisconnect",
+    "tuner", "tempo", "diag", "log", "report"].includes(cmd);
   if (needLocal && !S.local) return info("Sin datos", "Conecta la pedalera o abre un archivo de banco.");
   const cur = S.current, bankFirst = Math.floor(cur / 4) * 4;
   switch (cmd) {
@@ -2091,7 +2353,21 @@ async function run(cmd) {
       store.set("tankg.view", view);
       applyView();
       return toast(`Vista ${VIEWS[view]}`);
-    case "demo": return startDemo();
+    case "demo": return S.demo ? exitDemo() : startDemo();
+    case "tuner": return openTuner();
+    case "tempo": return openTempo();
+    case "diag":
+      A.copyText(diagReport());
+      return toast("Diagnóstico copiado: pégalo en tu mensaje o reporte");
+    case "log": return download(`tankg-registro-${stamp()}.txt`, diagReport());
+    case "report": {
+      const text = diagReport();
+      A.copyText(text);
+      if (!(await ask("Reportar un problema", "Se abre GitHub con un reporte nuevo que ya lleva el diagnóstico (versión, " +
+        "conexión y últimos errores; sin nombres de presets ni datos personales). Describe qué pasó y envíalo.\n\n" +
+        "Necesitas una cuenta de GitHub. El diagnóstico completo también queda copiado.", "Abrir GitHub"))) return;
+      return A.openUrl(diag.issueUrl(text));
+    }
     case "update": return checkUpdate(true);
     case "cloudConnect": return cloudConnect();
     case "cloudPush": return cloudPush(false);
@@ -2125,8 +2401,21 @@ async function run(cmd) {
 function wire() {
   $("connect").onclick = $("connectBig").onclick = () => connect();
   $("demoBig").onclick = startDemo;
+  $("tunInput").onchange = () => { store.set("tankg.tunerInput", $("tunInput").value); startTuner($("tunInput").value); };
+  $("tunTuning").onchange = () => { store.set("tankg.tunerTuning", Number($("tunTuning").value)); tunerStrings(); tunerClear(); };
+  $("tmpRange").oninput = () => tempoSet(Number($("tmpRange").value));
+  for (const b of document.querySelectorAll("#tmpSheet [data-step]")) b.onclick = () => tempoSet(MT.bpm + Number(b.dataset.step));
+  $("tmpMeter").onchange = () => tempoSet(MT.bpm, Number($("tmpMeter").value));
+  $("tmpTap").onpointerdown = e => { e.preventDefault(); tempoTap(); };   // on touch, not on release: tighter taps
+  $("tmpPlay").onclick = () => (MT.ctx ? tempoStop() : tempoStart());
+  $("tunA4").onchange = () => { store.set("tankg.tunerA4", Number($("tunA4").value) || 440); $("tunA4").value = tunerA4(); };
   $("offlineBig").onclick = openOffline;
   $("menuBtn").onclick = openMenu;
+  $("qAI").onclick = $("tbAI").onclick = () => run("ai");
+  $("tbTuner").onclick = () => run("tuner");
+  $("tbTempo").onclick = () => run("tempo");
+  $("qTuner").onclick = () => run("tuner");
+  $("qTempo").onclick = () => run("tempo");
   $("ampWarn").onclick = fixMissingAmp;
   $("menuSheet").onclick = e => { const b = e.target.closest("[data-cmd]"); if (b && !b.disabled) run(b.dataset.cmd); };
   $("menuSearch").oninput = filterMenu;
@@ -2261,7 +2550,13 @@ function wire() {
   $("stMain").onclick = e => { if (!swiped) stageGo(ST.pos + (e.clientX < innerWidth / 3 ? -1 : 1)); swiped = false; };
   new MutationObserver(() => { if ($("stage").hidden) A.keepAwake?.(false); }).observe($("stage"), { attributes: true, attributeFilter: ["hidden"] });
   // Android may kill the app in the background: a change still waiting for its upload is kept (rememberPending)
-  document.addEventListener("visibilitychange", () => { if (document.hidden && C.ready) rememberPending(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && C.ready) rememberPending();
+    if (document.hidden) { stopTuner(); tempoStop(); }   // the microphone is only used while the tuner is on screen
+    else if (!$("tunSheet").hidden) startTuner(store.get("tankg.tunerInput", ""));
+  });
+  window.addEventListener("error", e => diag.error(`JS: ${e.message}`));
+  window.addEventListener("unhandledrejection", e => diag.error(`JS: ${e.reason?.message || e.reason}`));
   document.addEventListener("keydown", e => {   // Bluetooth page turners and keyboards
     if ($("stage").hidden) return;
     if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); stageGo(ST.pos + 1); }
@@ -2311,4 +2606,5 @@ setInterval(() => {   // a Bluetooth pedal sends no "plugged in" event: retry qu
 // Every start: a mandatory (security) update blocks the app; optional ones are offered once a day.
 setTimeout(() => checkUpdate(false, true), 1500);
 
+diag.log(`Inicio · versión ${appVersion()}`);
 window.tankg = { S, connect, startDemo, upload, applyPresets, run, checkUpdate };   // for debugging over adb

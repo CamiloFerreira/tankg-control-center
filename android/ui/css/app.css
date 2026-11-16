@@ -397,6 +397,12 @@ select { background: var(--field); color: #f0f0f0; border: 1px solid var(--borde
 .tb.primary:disabled { background: var(--surface2); }
 .tb.accent { box-shadow: inset 0 0 0 1px var(--accent); color: #bff5dd; }
 .tsep { width: 1px; height: 24px; background: var(--border2); margin: 0 4px; }
+.tablet .toolbar { min-width: 0; overflow: hidden; }   /* never wider than the screen */
+.tb.only-icon span { display: none; }
+@media (max-width: 1440px) {   /* tablets up to 1440 px: icons only, except «Guardar cambios» */
+  .tablet .toolbar .tb:not(.primary) span { display: none; }
+  .tablet .toolbar .tb:not(.primary) { padding: 8px 9px; }
+}
 .tablet .bottom { display: none; }
 .tablet #editor { max-width: none; display: grid; grid-template-columns: minmax(230px, 300px) minmax(0, 1fr); gap: 12px;
   align-items: start; padding: 12px; }
@@ -447,3 +453,60 @@ select { background: var(--field); color: #f0f0f0; border: 1px solid var(--borde
 
 /* narrow phones: «Control Center» gives way to the status and «Conectar» */
 @media (max-width: 480px) { .brand .sub { display: none; } }
+
+/* tuner (desktop dialogs.TunerDialog) */
+.tuner { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 640px; margin: 0 auto; width: 100%; }
+.tun-note { font-size: clamp(96px, 30vw, 170px); font-weight: 800; line-height: 1; margin-top: 12px; color: #f0f0f0; }
+.tun-note sub { font-size: .3em; color: var(--dim); vertical-align: baseline; margin-left: 4px; }
+.tun-state { min-height: 1.4em; font-size: 20px; font-weight: 700; color: var(--dim); }
+.tun-state.ok { color: var(--ok); }
+.tun-state.low, .tun-state.high { color: var(--warn); }
+.tun-meter { position: relative; width: 100%; height: 64px; border-radius: 10px; background: var(--surface);
+  border: 1px solid var(--border2); overflow: hidden;
+  background-image: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), #2f3a40 calc(10% - 1px) 10%); }
+.tun-zone { position: absolute; top: 0; bottom: 0; left: 47%; width: 6%; background: rgba(93, 255, 158, .12); }
+.tun-center { position: absolute; top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; background: #c9d3da; }
+.tun-needle { position: absolute; top: 6px; bottom: 6px; width: 8px; margin-left: -4px; border-radius: 4px; background: var(--warn);
+  transition: left .12s linear; }
+.tun-needle.ok { background: var(--ok); }
+.tun-scale { display: flex; justify-content: space-between; width: 100%; font-size: 12px; color: var(--dim); }
+.tun-strings { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; width: 100%; }
+.tun-strings span { text-align: center; padding: 10px 0; border-radius: 8px; background: var(--surface); font-weight: 800; font-size: 20px;
+  color: var(--dim); }
+.tun-strings span.on { background: var(--teal); color: #fff; }
+.tun-strings span.on.ok { background: var(--accent); }
+.tun-info { display: flex; gap: 16px; justify-content: center; color: var(--dim); margin: 0; font-variant-numeric: tabular-nums; }
+.tun-opts { display: flex; flex-wrap: wrap; gap: 10px 18px; justify-content: center; width: 100%; color: var(--dim); }
+.tun-opts label { display: flex; align-items: center; gap: 8px; }
+.tun-opts select { max-width: 60vw; }
+.tun-opts input { width: 74px; background: var(--field); color: #f0f0f0; border: 1px solid var(--border2); border-radius: 8px;
+  padding: 9px 8px; font: inherit; }
+
+/* metronome (desktop dialogs.MetronomeDialog) */
+.tempo { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 640px; margin: 0 auto; width: 100%; }
+.tmp-bpm { font-size: clamp(84px, 26vw, 140px); font-weight: 800; line-height: 1; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.tmp-bpm small { font-size: .2em; color: var(--dim); margin-left: 6px; }
+.tmp-mark { color: var(--dim); font-size: 18px; font-weight: 700; min-height: 1.3em; }
+.tmp-beats { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; min-height: 34px; }
+.tmp-beats i { width: 28px; height: 28px; border-radius: 50%; background: var(--surface2); border: 2px solid var(--border2); }
+.tmp-beats i.accent { border-color: var(--warn); }
+.tmp-beats i.on { background: var(--accent-h); border-color: var(--accent-h); }
+.tmp-beats i.accent.on { background: var(--warn); border-color: var(--warn); }
+.tmp-range { width: 100%; accent-color: var(--accent); }
+.tmp-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; }
+.tmp-main { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+.tmp-tap, .tmp-play { min-height: 72px; font-size: 22px; font-weight: 800; }
+.tmp-tap:active { background: var(--teal); }
+.tmp-meter { display: flex; align-items: center; gap: 8px; color: var(--dim); }
+.tmp-delay { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; width: 100%; padding: 12px 14px; border-radius: 12px;
+  background: var(--surface); font-variant-numeric: tabular-nums; }
+.tmp-delay b { text-align: right; }
+.tempo h3.step { align-self: flex-start; }
+
+/* phone view: tuner and metronome next to the menu button */
+.quick-tool { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border-radius: 10px; color: var(--dim); }
+.quick-tool .ic { width: 24px; height: 24px; }
+.quick-tool:active { background: var(--surface2); color: var(--text); }
+.quick-tool.ai { color: #bff5dd; }
+.tablet .quick-tool { display: none; }
+@media (max-width: 460px) { body:not(.tablet) .top .logo { display: none; } }   /* room for the quick buttons */

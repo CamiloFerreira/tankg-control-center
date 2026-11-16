@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import ctypes.util
 import os
+import platform
 import sys
 import time
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRect, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, QRect, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal, qVersion
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout,
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
     QSlider, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import am4, cloud, dialogs, library, pack, setlist, theme, updater
+from . import am4, cloud, demo, diag, dialogs, library, pack, setlist, theme, updater
 from .version import PRIVACY_URL, TERMS_URL, __version__
 from .device import DeviceError, TankG, find_devices
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, SLOTS, Bank, Preset, slot_name, zone_gap, zone_of
@@ -440,6 +441,10 @@ class MainWindow(QMainWindow):
         self._ble_try = -1e9      # last attempt to reach it (time.monotonic)
         self._offline_undo: int | None = None   # editor opened from a backup without the pedal (undo depth then)
         self.session_backup_done = False
+        self.demo = False                 # demo mode: every job talks to demo.SimulatedPedal
+        self.demo_pedal: demo.SimulatedPedal | None = None
+        self._demo_saved = None           # editor and names before the demo, put back when it ends
+        self._last_devs: list = []        # what _poll_device saw (for the diagnostic report)
         self.live_timer = QTimer(self)
         self.live_timer.setSingleShot(True)
         self.live_timer.timeout.connect(self._live_send)
@@ -455,7 +460,17 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(root)
-        self.setCentralWidget(scroll)
+        central = QWidget()   # the demo banner stays above the scrolling editor, as wide as the window
+        central.setObjectName("root")
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        banner_box = QHBoxLayout()
+        banner_box.setContentsMargins(10, 10, 10, 0)
+        banner_box.addWidget(self._build_demo_banner())
+        outer.addLayout(banner_box)
+        outer.addWidget(scroll, 1)
+        self.setCentralWidget(central)
 
         self.conn = QLabel()
         self.conn.setObjectName("conn")
@@ -487,6 +502,23 @@ class MainWindow(QMainWindow):
         self._poll_device()
 
     # layout --------------------------------------------------------------------------
+
+    def _build_demo_banner(self) -> QWidget:
+        """Strip above the editor while the demo pedal is in use (the APK shows «Demo» in its status pill)."""
+        self.demo_banner = QFrame()
+        self.demo_banner.setObjectName("demoBanner")
+        row = QHBoxLayout(self.demo_banner)
+        row.setContentsMargins(14, 8, 10, 8)
+        text = QLabel("MODO DEMO  ·  pedalera simulada: lo que guardes no sale de este equipo")
+        text.setObjectName("demoText")
+        leave = QPushButton("Salir del modo demo")
+        leave.setObjectName("secondary")
+        leave.setCursor(Qt.PointingHandCursor)
+        leave.clicked.connect(self.exit_demo)
+        row.addWidget(text, 1)
+        row.addWidget(leave)
+        self.demo_banner.hide()
+        return self.demo_banner
 
     def _build_browser(self) -> QWidget:
         """The 36 presets: one card per bank (its name + four tiles A-D, like the footswitches)."""
@@ -705,6 +737,8 @@ class MainWindow(QMainWindow):
         act("setlists", "Setlists", self.open_setlists, "Ctrl+J",
             "Setlists: tus shows en orden, con notas y modo escenario (Ctrl+J)")
         act("ai", "Crear con IA", self.open_ai, "Ctrl+K", "Describe un sonido y la IA crea el preset (Ctrl+K)")
+        act("tuner", "Afinador", self.open_tuner, "Ctrl+T", "Afinador cromático o por afinación (Ctrl+T)")
+        act("tempo", "Tempo", self.open_tempo, "Ctrl+M", "Metrónomo, tap tempo y tiempos de delay (Ctrl+M)")
         act("copy", "Copiar", self.copy_preset, "Ctrl+C")
         act("paste", "Pegar", self.paste_preset, "Ctrl+V")
         act("duplicate", "Duplicar en otro slot…", self.duplicate_preset, "Ctrl+D")
@@ -735,16 +769,18 @@ class MainWindow(QMainWindow):
         tb.setIconSize(QSize(18, 18))
         self.addToolBar(tb)
         icons = {"read": "refresh", "send_all": "save", "undo": "undo", "library": "library", "setlists": "setlist",
-                 "ai": "ai", "live": "live"}   # line icons of tankg/menu.py, like the APK
+                 "ai": "ai", "live": "live", "tuner": "tuner", "tempo": "tempo"}   # line icons of tankg/menu.py, like the APK
         for key, name in icons.items():
             self.act[key].setIcon(QIcon(dialogs.menu_icon(name, "#ffffff" if key == "send_all" else "#8fe0be", 18)))
-        for key in ("menu", None, "read", "send_all", "undo", None, "library", "setlists", "ai"):
+        for key in ("menu", None, "read", "send_all", "undo", None, "library", "setlists", "ai", None, "tuner", "tempo"):
             if key is None:
                 tb.addSeparator()
             else:
                 tb.addAction(self.act[key])
         for key, name in (("send_all", "toolPrimary"), ("ai", "toolAccent")):
             tb.widgetForAction(self.act[key]).setObjectName(name)
+        for key in ("tuner", "tempo"):   # icon only (tooltip): the bar must fit 1280-pixel screens
+            tb.widgetForAction(self.act[key]).setToolButtonStyle(Qt.ToolButtonIconOnly)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
@@ -773,7 +809,8 @@ class MainWindow(QMainWindow):
         """command -> keyboard shortcut shown in the menu."""
         keys = {"read": "read", "saveAll": "send_all", "saveOne": "send_one", "activate": "activate", "undo": "undo",
                 "copy": "copy", "paste": "paste", "duplicate": "duplicate", "left": "left", "right": "right",
-                "renameBank": "rename_bank", "library": "library", "setlist": "setlists", "ai": "ai", "backupNow": "backup"}
+                "renameBank": "rename_bank", "library": "library", "setlist": "setlists", "ai": "ai", "backupNow": "backup",
+                "tuner": "tuner", "tempo": "tempo"}
         out = {cmd: self.act[k].shortcut().toString(QKeySequence.NativeText) for cmd, k in keys.items()}
         out.update({"openBank": "Ctrl+O", "saveBank": "Ctrl+S", "importPreset": "Ctrl+I", "exportPreset": "Ctrl+E"})
         return {c: k for c, k in out.items() if k}
@@ -791,7 +828,10 @@ class MainWindow(QMainWindow):
         cloud_on = bool(library.Settings().cloud.get("refresh_token"))
         state = {"saveAll": dev and bool(mod), "saveOne": dev and cur_mod, "activate": dev, "live": dev,
                  "undo": bool(self.undo_stack), "paste": self.clipboard is not None, "revert": cur_mod,
-                 "revertAll": bool(mod), "backupNow": dev, "restoreFile": dev, "cloudPush": has, "cloudPull": has}
+                 "revertAll": bool(mod), "backupNow": dev and not self.demo, "restoreFile": dev, "cloudPush": has and not self.demo,
+                 "cloudPull": has and not self.demo}
+        if self.demo:   # Bluetooth-only operations need the real pedal
+            state.update(ampUpload=False, factoryAmpCab=False)
         for cmd in ("copy", "duplicate", "swap", "left", "right", "setlist", "renameBank", "library", "ai", "factory",
                     "factoryBank", "factoryAll", "saveBank", "importPreset", "exportPreset", "importSet", "exportSet",
                     "compare", "bytes", "exportPack"):
@@ -824,6 +864,8 @@ class MainWindow(QMainWindow):
             "cloudHistory": self.cloud_history, "cloudDisconnect": self.cloud_disconnect,
             "calibrate": lambda: dialogs.CalibrationWizard(self).exec(), "update": self.check_updates,
             "bytes": self.show_bytes, "about": self.about,
+            "demo": self.toggle_demo, "tuner": self.open_tuner, "tempo": self.open_tempo, "diag": self.copy_diagnostic, "log": self.save_log,
+            "report": self.report_problem,
         }
 
     def _action(self, menu, text, fn, shortcut=None):
@@ -927,14 +969,18 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _update_status(self) -> None:
-        if self.connected:
+        self.demo_banner.setVisible(self.demo)
+        if self.demo:
+            self.conn.setText("● Demo · pedalera simulada")
+            self.conn.setStyleSheet("background: #3b3410; color: #ffd36b;")
+        elif self.connected:
             self.conn.setText("● Tank-G conectada")
             self.conn.setStyleSheet("background: #12402c; color: #5dff9e;")
         else:
             self.conn.setText("● Tank-G desconectada")
             self.conn.setStyleSheet("background: #40121a; color: #ff7d8f;")
         n = len(self.modified_slots())
-        self.setWindowTitle("Tank-G Control Center" + (f" — {n} sin guardar" if n else ""))
+        self.setWindowTitle("Tank-G Control Center" + (" — demo" if self.demo else "") + (f" — {n} sin guardar" if n else ""))
 
     def _need_local(self) -> bool:
         if self.local is None:
@@ -998,6 +1044,10 @@ class MainWindow(QMainWindow):
             return False
         self.busy = True
         self.statusBar().showMessage(label)
+        if self.demo:   # nothing reaches a real pedal while the demo is on
+            pedal = self.demo_pedal
+            opener = lambda: TankG(pedal)  # noqa: E731
+        diag.log(label)
         job = Job(fn, opener)
         job.setAutoDelete(False)
         self._jobs.add(job)   # keep the runnable and its signals alive until it reports back
@@ -1017,6 +1067,7 @@ class MainWindow(QMainWindow):
 
     def _job_failed(self, msg: str, quiet: bool, dialog=None) -> None:
         self.busy = False
+        diag.error(msg)
         if self._ble_ok:   # the Bluetooth pedal stopped answering: disconnected until it answers again
             self._ble_ok = False
             self._ble_try = time.monotonic()
@@ -1040,8 +1091,12 @@ class MainWindow(QMainWindow):
         """USB ports are seen by the system when the pedal is plugged in; a Bluetooth pedal saved in
         «Puerto MIDI…» is only a candidate (it may be off or away), so it counts once it answered a read,
         tried quietly every 30 s, and stops counting when an operation with it fails."""
+        if self.demo:   # the simulated pedal is always there; a real one waits until the demo ends
+            self._update_status()
+            return
         was = self.connected
         devs = find_devices()
+        self._last_devs = devs
         if devs and all(getattr(d, "backend", "") == "ble" for d in devs):
             if not self._ble_ok and not self.busy and time.monotonic() - self._ble_try > 30:
                 self._ble_try = time.monotonic()
@@ -1053,6 +1108,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("No se detecta la Tank-G. Si está conectada, elige el puerto en "
                                          "☰ Menú → Puerto MIDI…")
         if self.connected != was:
+            diag.log("Tank-G conectada" if self.connected else "Tank-G desconectada")
             self.statusBar().showMessage("Tank-G conectada" if self.connected else "Tank-G desconectada", 4000)
             if self.connected and self.device is None and not self.busy:
                 self.read_device()
@@ -1113,7 +1169,7 @@ class MainWindow(QMainWindow):
 
     def _write_job(self, slots: list[int], select: int | None):
         target = self.local.copy()
-        need_backup = not self.session_backup_done
+        need_backup = not self.session_backup_done and not self.demo   # the demo pedal is not backed up
 
         names = {s: self.aliases.preset(s) for s in slots}
 
@@ -1490,6 +1546,9 @@ class MainWindow(QMainWindow):
     # bank operations -----------------------------------------------------------------
 
     def backup_device(self) -> None:
+        if self.demo:
+            QMessageBox.information(self, "Backup", "En el modo demo no hay backups: la pedalera es simulada.")
+            return
         self._run(lambda dev, _: str(library.backup(dev.read_bank(), "manual")),
                   lambda path: QMessageBox.information(self, "Backup", f"Banco guardado en:\n{path}"),
                   "Haciendo backup...")
@@ -1796,6 +1855,8 @@ class MainWindow(QMainWindow):
     # cloud (Google Drive) -------------------------------------------------------------
 
     def _drive(self) -> "cloud.Drive | None":
+        if self.demo:   # the demo presets never reach the cloud
+            return None
         token = library.Settings().cloud.get("refresh_token")
         return cloud.Drive(token) if token and cloud.configured() else None
 
@@ -2157,6 +2218,113 @@ class MainWindow(QMainWindow):
 
         self._background(lambda: updater.download(rel), installed, failed)
 
+    # demo mode (APK: startDemo / exitDemo) ---------------------------------------------
+
+    def toggle_demo(self) -> None:
+        self.exit_demo() if self.demo else self.start_demo()
+
+    def start_demo(self) -> None:
+        """A simulated pedal with nine banks of the band library: everything works (edit, save, live
+        audition, setlists) without a Tank-G. Its names go to their own file; the real editor, names,
+        backups and cloud are untouched and come back when the demo ends."""
+        if self.demo:
+            return
+        if self.busy:
+            QMessageBox.information(self, "Ocupado", "Hay una operación en curso.")
+            return
+        if self.live_action.isChecked():
+            self.live_action.setChecked(False)
+        self._demo_saved = (self.device, self.local, self.undo_stack, self.current, self._offline_undo, self.aliases,
+                            self.connected, self.session_backup_done)
+        bank, preset_names, bank_names = demo.demo_bank()
+        names = library.Aliases(library.DATA_DIR / "aliases.demo.json")
+        names.presets = {slot_name(s): n for s, n in preset_names.items()}
+        names.banks = {str(b + 1): n for b, n in bank_names.items()}
+        names.save()
+        self.aliases = names
+        self.demo_pedal = demo.SimulatedPedal(bank.to_bytes())
+        self.demo = True
+        self.device, self.local = bank, bank.copy()
+        self.undo_stack, self.current, self._offline_undo = [], 0, None
+        self.connected = True
+        diag.log("Modo demo")
+        self.refresh()
+        self.statusBar().showMessage("Modo demo: una pedalera simulada, nada sale de este equipo.", 8000)
+
+    def exit_demo(self) -> None:
+        if not self.demo:
+            return
+        if self.busy:
+            QMessageBox.information(self, "Ocupado", "Hay una operación en curso.")
+            return
+        if self.modified_slots() and not dialogs.ask(self, "Salir del modo demo",
+                                                     "Los cambios hechos en la pedalera simulada se descartan. ¿Salir?"):
+            return
+        if self.live_action.isChecked():
+            self.live_action.setChecked(False)
+        (self.device, self.local, self.undo_stack, self.current, self._offline_undo, self.aliases,
+         self.connected, self.session_backup_done) = self._demo_saved
+        self._demo_saved = None
+        self.demo, self.demo_pedal = False, None
+        self.connected = False   # look for the real pedal again
+        diag.log("Fin del modo demo")
+        self.refresh()
+        self.statusBar().showMessage("Modo demo cerrado.", 4000)
+        self._poll_device()
+
+    # tuner and diagnostics -----------------------------------------------------------
+
+    def open_tuner(self) -> None:
+        dialogs.TunerDialog(self).exec()
+
+    def open_tempo(self) -> None:
+        dialogs.MetronomeDialog(self).exec()
+
+    def diagnostic_report(self) -> str:
+        if self.demo:
+            pedal, port = "simulada (modo demo)", ""
+        elif self.connected:
+            ble = any(getattr(d, "backend", "") == "ble" for d in self._last_devs)
+            pedal = f"conectada ({'Bluetooth' if ble else 'USB'})"
+            port = ", ".join(d.describe() for d in self._last_devs[:2] if hasattr(d, "describe"))
+        else:
+            pedal, port = "desconectada", ""
+        how = "ejecutable" if getattr(sys, "frozen", False) else "código fuente"
+        if updater.installed_from_deb():
+            how = "paquete .deb"
+        return diag.report({
+            "version": __version__,
+            "platform": f"{platform.system()} {platform.release()} · Python {platform.python_version()} · Qt {qVersion()} · {how}",
+            "pedal": pedal, "port": port, "demo": self.demo, "modified": len(self.modified_slots()),
+            "cloud": bool(library.Settings().cloud.get("refresh_token")), "backups": len(library.list_backups()),
+            "errors": diag.errors(), "log": diag.lines()})
+
+    def copy_diagnostic(self) -> None:
+        QApplication.clipboard().setText(self.diagnostic_report())
+        self.statusBar().showMessage("Diagnóstico copiado: pégalo en tu mensaje o reporte.", 6000)
+
+    def save_log(self) -> None:
+        from datetime import datetime
+        default = str(Path.home() / f"tankg-registro-{datetime.now():%Y%m%d-%H%M%S}.txt")
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar registro de la sesión", default, "Texto (*.txt)")
+        if not path:
+            return
+        try:
+            Path(path).write_text(self.diagnostic_report(), encoding="utf-8")
+        except OSError as e:
+            QMessageBox.critical(self, "Error", f"No se pudo guardar: {e}")
+            return
+        self.statusBar().showMessage(f"Registro guardado en {path}", 6000)
+
+    def report_problem(self) -> None:
+        text = self.diagnostic_report()
+        QApplication.clipboard().setText(text)
+        if dialogs.ask(self, "Reportar un problema",
+                       "Se abre GitHub con un reporte nuevo que ya lleva el diagnóstico (versión, conexión y últimos "
+                       "errores; sin nombres de presets ni datos personales). Describe qué pasó y envíalo.\n\n"
+                       "Necesitas una cuenta de GitHub. El diagnóstico completo también queda copiado."):
+            QDesktopServices.openUrl(QUrl.fromEncoded(diag.issue_url(text).encode()))
+
     def about(self) -> None:
         QMessageBox.about(self, "Tank-G Control Center",
                           f"<p><b>Versión {__version__}</b></p>"
@@ -2167,7 +2335,7 @@ class MainWindow(QMainWindow):
                           f'<a href="{TERMS_URL}">Condiciones del servicio</a></p>')
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API
-        if not getattr(self, "_forcing", False) and self.modified_slots() and not dialogs.ask(
+        if not getattr(self, "_forcing", False) and not self.demo and self.modified_slots() and not dialogs.ask(
                 self, "Salir", "Hay presets modificados sin guardar en la pedalera. ¿Salir igualmente?"):
             event.ignore()
             return

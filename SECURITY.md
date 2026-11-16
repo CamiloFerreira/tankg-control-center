@@ -19,7 +19,9 @@ de comandos (`tankg list`, etc.) no se bloquea.
 
 | Versión | Estado |
 |---|---|
-| 1.11.x | Soportada. Versión mínima obligatoria |
+| 1.12.x | Soportada (última) |
+| 1.11.1 | Versión mínima obligatoria: funciona, pero ofrece actualizar |
+| 1.11.0 | Bloqueada hasta actualizar |
 | ≤ 1.10.2 | Sin soporte: actualizar a mano a la 1.11.0 (estas versiones no conocen el bloqueo) |
 
 ## Cómo reportar una vulnerabilidad
@@ -152,6 +154,15 @@ referenciaban por etiqueta (`@v5`), que su autor puede mover.
   secretos).
 - APK: `allowBackup=false`, depuración del WebView solo en compilaciones debug, sin acceso a archivos
   desde el WebView, y enlaces externos abiertos en el navegador del sistema.
+- Micrófono (afinador, 1.12.0): el WebView solo concede la captura de audio, y solo a las páginas de la
+  propia app (`onPermissionRequest`); cámara y otros recursos se rechazan. El audio se analiza en memoria
+  mientras el afinador está en pantalla y se suelta al cerrarlo o al pasar la app a segundo plano.
+- Diagnóstico (1.12.0): el registro de la sesión vive en memoria y enmascara correos, claves de API,
+  tokens y la carpeta de usuario (`diag.scrub` / `scrub` en `diag.js`); nunca incluye nombres de presets,
+  archivos ni la sesión de Google. Solo sale del equipo cuando el usuario lo copia, lo guarda o abre el
+  reporte en GitHub, que no se publica sin su confirmación.
+- Modo demo (1.12.0): todas las operaciones van a una pedalera simulada en memoria (`demo.SimulatedPedal`
+  / `fakePedal`); no abre la pedalera real ni toca backups, nube ni los nombres reales.
 
 ## Pendiente (riesgo aceptado por ahora)
 

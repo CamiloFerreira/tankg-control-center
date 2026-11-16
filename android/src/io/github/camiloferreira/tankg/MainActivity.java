@@ -30,6 +30,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -71,6 +72,8 @@ public class MainActivity extends Activity {
     private static final String HOST = "appassets.androidplatform.net";
     private static final String INSTALL_ACTION = "io.github.camiloferreira.tankg.INSTALL_STATUS";
     private static final int PICK_FILE = 1;
+    private static final int AUDIO_PERMISSION = 8;
+    private PermissionRequest pendingAudio;   // the tuner's microphone request, waiting for the user's answer
     private ValueCallback<Uri[]> pickCallback;
     private Ble ble;
 
@@ -111,6 +114,29 @@ public class MainActivity extends Activity {
                 }
                 return true;
             }
+
+            /** getUserMedia: only the microphone (the tuner), only for the app's own pages. */
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                String[] res = request.getResources();
+                boolean audioOnly = res.length == 1 && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(res[0]);
+                if (!audioOnly || !HOST.equals(request.getOrigin().getHost())) {
+                    request.deny();
+                    return;
+                }
+                if (checkSelfPermission("android.permission.RECORD_AUDIO") == PackageManager.PERMISSION_GRANTED) {
+                    request.grant(res);
+                    return;
+                }
+                if (pendingAudio != null) pendingAudio.deny();
+                pendingAudio = request;
+                requestPermissions(new String[]{"android.permission.RECORD_AUDIO"}, AUDIO_PERMISSION);
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (pendingAudio == request) pendingAudio = null;
+            }
         });
         web.addJavascriptInterface(new Bridge(), "AndroidMidi");
         setContentView(web);
@@ -129,6 +155,16 @@ public class MainActivity extends Activity {
         Uri uri = result == RESULT_OK && data != null ? data.getData() : null;
         pickCallback.onReceiveValue(uri == null ? null : new Uri[]{uri});
         pickCallback = null;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int request, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(request, perms, results);
+        if (request != AUDIO_PERMISSION || pendingAudio == null) return;
+        PermissionRequest r = pendingAudio;
+        pendingAudio = null;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) r.grant(r.getResources());
+        else r.deny();
     }
 
     @Override

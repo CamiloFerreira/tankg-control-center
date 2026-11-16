@@ -1,6 +1,6 @@
 """Single source of the app version for the desktop build, the APK (android/build.sh) and the
 Android UI (tools/export_ui.py). Release tags must match it (v + __version__)."""
-__version__ = "1.11.1"
+__version__ = "1.12.0"
 # Oldest version still allowed to run. Raise it to this release's version when the release fixes
 # something important (security): older apps then refuse to work until they update. The release
 # workflow writes it into the release notes as <!-- tankg-min-version: X --> and every app reads it

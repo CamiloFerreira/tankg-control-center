@@ -283,7 +283,7 @@ def test_command_menu_covers_every_command_and_searches(env):
     w, *_ = env
     actions = w.command_actions()
     assert {cmd for _, cmd, *_ in menu.items()} == set(actions)   # every desktop entry runs something
-    assert {"view", "demo"} == {cmd for _, entries in [(g[0], g[2]) for g in menu.MENU] for cmd, *_ in entries} - set(actions)
+    assert {"view"} == {cmd for _, entries in [(g[0], g[2]) for g in menu.MENU] for cmd, *_ in entries} - set(actions)
     ran = []
     with mock.patch.object(w, "command_actions", lambda: {c: (lambda c=c: ran.append(c)) for c in actions}):
         d = dialogs.CommandMenu(w)
@@ -510,3 +510,134 @@ def test_editor_opens_last_backup_without_pedal(env, tmp_path, monkeypatch):
     w.connected = True
     w.read_device()                            # untouched: the pedal replaces it
     assert wait(lambda: not w.busy) and w.local.to_bytes() == w.device.to_bytes()
+
+
+def test_demo_mode_uses_a_simulated_pedal_and_leaves_the_real_one_alone(env, tmp_path):
+    w, pedal, wait, _ = env
+    real_mem, real_local, real_aliases = bytes(pedal.mem), w.local, w.aliases
+    backups = []
+    with mock.patch.object(library, "backup", lambda bank, why: backups.append(why) or tmp_path / "x.tgbank"):
+        _demo_round_trip(w, pedal, wait, real_mem, real_local, real_aliases, backups)
+
+
+def _demo_round_trip(w, pedal, wait, real_mem, real_local, real_aliases, backups):
+    w.run_command("demo")
+    assert w.demo and w.connected and not w.demo_banner.isHidden() and "Demo" in w.conn.text()
+    assert w.aliases is not real_aliases and w.aliases.bank(1) == "Metallica" and w.local is not real_local
+    assert w.command_state()["backupNow"] is False and w._drive() is None   # no backups, no cloud
+    w._set_local(0, w.local.presets[1].copy())
+    assert w.modified_slots() == [0]
+    w.send_all()
+    assert wait(lambda: not w.busy and not w.modified_slots())
+    assert bytes(w.demo_pedal.mem[2:23]) == w.local.presets[1].to_bytes()
+    assert bytes(pedal.mem) == real_mem and backups == []   # the real pedal was never opened
+    w._poll_device()
+    assert w.demo
+    w.run_command("demo")   # the same command leaves it
+    assert not w.demo and w.demo_pedal is None and w.demo_banner.isHidden()
+    assert w.local is real_local and w.aliases is real_aliases and w.connected
+
+
+def test_diagnostic_commands(env, tmp_path, monkeypatch):
+    from tankg import diag
+    w, pedal, wait, _ = env
+    opened = []
+    monkeypatch.setattr(gui.QDesktopServices, "openUrl", lambda url: opened.append(url.toString(gui.QUrl.FullyEncoded)))
+    diag.error("DeviceError: la pedalera no respondió")
+    text = w.diagnostic_report()
+    assert text.startswith(f"Tank-G Control Center {gui.__version__}\n") and "Pedalera: conectada (USB)" in text
+    assert "la pedalera no respondió" in text and "Modo demo: no" in text
+    w.run_command("report")
+    assert len(opened) == 1 and "/issues/new?title=" in opened[0] and "%0A" in opened[0]
+    path = tmp_path / "registro.txt"
+    monkeypatch.setattr(gui.QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
+    w.run_command("log")
+    assert path.read_text(encoding="utf-8").startswith("Tank-G Control Center")
+    w.run_command("diag")   # copies it (no error without a real clipboard)
+    diag.clear()
+
+
+def test_tuner_dialog_shows_the_note_of_the_samples(env, monkeypatch):
+    import math
+    import struct
+    from PySide6 import QtCore
+    from tankg import tuner
+    w, *_ = env
+    monkeypatch.setattr(dialogs.TunerDialog, "_start", lambda self: None)        # no audio device in CI
+    monkeypatch.setattr(dialogs.TunerDialog, "_fill_inputs", lambda self: None)
+    d = dialogs.TunerDialog(w)
+    assert d.tuning == 0 and d.strings == []   # chromatic by default: no strings
+    d.tuning_box.setCurrentIndex(1)            # standard guitar tuning
+    assert [lab.text() for lab in d.strings] == ["E2", "A2", "D3", "G3", "B3", "E4"]
+    assert library.Settings().tuner["tuning"] == 1
+    d.rate, d.fresh = 48000, True
+    d.samples = [0.2 * math.sin(2 * math.pi * 110 * i / 48000) for i in range(tuner.FRAME)]
+    d._tick()
+    assert (d.note.text(), d.octave.text(), d.state.property("state")) == ("A", "2", "ok")
+    assert d.strings[1].property("on") is True and d.strings[1].property("ok") is True and d.meter.cents is not None
+    for _ in range(9):
+        d._show(None, -80.0)
+    assert d.note.text() == "–" and d.meter.cents is None and d.state.text() == tuner.WAITING
+    d.a4_box.setValue(442)
+    assert library.Settings().tuner["a4"] == 442 and d.a4 == 442
+    QtMultimedia = pytest.importorskip("PySide6.QtMultimedia")
+
+    class FakeInput:
+        def readAll(self):
+            return QtCore.QByteArray(struct.pack("<4h", 16384, 0, -16384, 0) + b"\x01")
+
+    d.sample_format, d.channels, d.samples, d.io = QtMultimedia.QAudioFormat.SampleFormat.Int16, 2, [], FakeInput()
+    d._read()   # stereo 16-bit: first channel, scaled to -1..1, odd byte kept for the next read
+    assert d.samples == [0.5, -0.5] and d._rest == b"\x01"
+    d.io = None
+    d.reject()
+    assert d.source is None
+
+
+
+def test_metronome_dialog_tap_meter_and_click_stream(env, monkeypatch):
+    from tankg import tempo
+    w, *_ = env
+    d = dialogs.MetronomeDialog(w)
+    for t in (10.0, 10.5, 11.0, 11.5):   # taps every half second
+        d.tap(t)
+    assert d.bpm == 120 and d.bpm_label.text() == "120 BPM" and d.mark.text() == "Allegro"
+    assert [b.text() for _, b in d.delay_labels][:3] == ["<b>500 ms</b>", "<b>375 ms</b>", "<b>250 ms</b>"]
+    d.meter_box.setCurrentIndex(1)   # 3/4
+    assert d.lights.beats == 3 and library.Settings().tempo == {"bpm": 120, "meter": 1}
+    d.set_bpm(1000)
+    assert d.bpm == tempo.BPM_RANGE[1] and d.slider.value() == tempo.BPM_RANGE[1]
+    QtMultimedia = pytest.importorskip("PySide6.QtMultimedia")
+    SF = QtMultimedia.QAudioFormat.SampleFormat
+    data = dialogs.MetronomeDialog.encode([0.5, -2.0], SF.Int16, 2)
+    import struct
+    assert struct.unpack("<4h", data) == (16383, 16383, -32767, -32767)
+    assert len(dialogs.MetronomeDialog.encode([0.1] * 10, SF.Float, 1)) == 40
+
+    class FakeSink:   # the audio output, without a sound card
+        def __init__(self):
+            self.free, self.used = 2 * 5760, 0
+        def bytesFree(self):
+            return self.free
+        def processedUSecs(self):
+            return self.used
+        def stop(self):
+            pass
+        def deleteLater(self):
+            pass
+
+    class FakeIO:
+        def __init__(self):
+            self.data = b""
+        def write(self, b):
+            self.data += b[:4000]   # a partial write: the rest waits
+            return min(len(b), 4000)
+
+    d.set_bpm(120)
+    d.sink, d.io, d.rate, d.channels, d.sample_format = FakeSink(), FakeIO(), 48000, 1, SF.Int16
+    d.track = tempo.ClickTrack(48000, 120, 3)
+    d._pump()
+    assert len(d.io.data) == 4000 and len(d._pending) == 2 * 5760 - 4000
+    assert d.lights.lit == 0   # the accented first beat is sounding
+    d.reject()
+    assert d.sink is None and d.track is None

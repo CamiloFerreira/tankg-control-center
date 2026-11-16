@@ -975,3 +975,96 @@ def test_deb_update_uses_a_private_folder(tmp_path, monkeypatch):
     assert deb.parent != tmp_path and deb.parent.parent == tmp_path and deb.read_bytes() == b"deb"
     assert deb.parent.stat().st_mode & 0o777 == 0o711 and not (tmp_path / "victim").exists()
     assert runs[0][:3] == ["sh", "-c", 'pkexec apt-get install -y "$1"; rm -rf "$2"; exec "$3"']
+
+
+# tuner, diagnostics and demo pedal (tankg/tuner.py, diag.py, demo.py) ---------------------------
+
+def _tone(freq, rate, n=4096, harmonics=(1, 0.6, 0.4, 0.3)):
+    import math
+    return [0.15 * sum(a * math.sin(2 * math.pi * freq * (k + 1) * i / rate + k) for k, a in enumerate(harmonics))
+            for i in range(n)]
+
+
+def test_tuner_finds_every_guitar_string_within_a_cent():
+    import math
+    from tankg import tuner
+    for rate in (44100, 48000):
+        for midi in tuner.TUNINGS[1][1] + tuner.TUNINGS[-1][1]:   # guitar and five-string bass (low B 30.9 Hz)
+            freq = 440 * 2 ** ((midi - 69) / 12)
+            found = tuner.detect(_tone(freq, rate), rate)
+            assert found is not None and abs(1200 * math.log2(found / freq)) < 1, (midi, rate, found)
+            n = tuner.note(found)
+            assert tuner.note_name(n["midi"]) == tuner.note_name(midi) and tuner.state(n["cents"]) == "ok"
+    weak_fundamental = _tone(82.41, 48000, harmonics=(0.15, 1, 0.8, 0.5))   # no octave jump
+    assert tuner.note(tuner.detect(weak_fundamental, 48000))["octave"] == 2
+    assert tuner.detect([0.0] * 4096, 48000) is None and tuner.level([0.0] * 10) == -120
+    flat = tuner.note(110 * 2 ** (-20 / 1200))
+    assert flat["name"] == "A" and round(flat["cents"]) == -20 and tuner.state(flat["cents"]) == "low"
+    assert tuner.note(432, a4=432)["cents"] == pytest.approx(0) and tuner.state(4) == "high"
+    # with a tuning the reading is against the target string, even several semitones away
+    drop_d = next(i for i, (name, _) in enumerate(tuner.TUNINGS) if name.startswith("Drop D"))
+    low_e = 440 * 2 ** ((40 - 69) / 12)
+    r = tuner.reading(low_e, drop_d)
+    assert (r["name"], r["octave"], r["string"], r["heard"], r["state"]) == ("D", 2, 0, "E2", "high")
+    assert round(r["cents"]) == 200
+    chromatic = tuner.reading(low_e, 0)
+    assert (chromatic["name"], chromatic["string"], chromatic["state"]) == ("E", -1, "ok")
+
+
+def test_tempo_tap_markings_and_click_track():
+    from tankg import tempo
+    assert tempo.tap([0, 0.5, 1.0, 1.5]) == 120 and tempo.tap([0, 0.5, 9, 9.4, 9.8]) == 150   # a pause restarts
+    assert tempo.tap([3]) is None and tempo.tap([0, 0.01]) == tempo.BPM_RANGE[1] and tempo.clamp(10) == tempo.BPM_RANGE[0]
+    assert tempo.marking(120) == "Allegro" and tempo.marking(40) == "Largo"
+    assert dict(tempo.delay_times(120)) == {"Negra": 500, "Corchea con puntillo": 375, "Corchea": 250,
+                                            "Tresillo de corchea": 167, "Semicorchea": 125}
+    track = tempo.ClickTrack(48000, 120, 3)
+    out = []
+    for _ in range(80):
+        out += track.render(997)   # blocks that cut clicks in two
+    assert [s for s, _ in track.clicks] == [0, 24000, 48000, 72000]
+    assert [b for _, b in track.clicks] == [0, 1, 2, 0]
+    whole = tempo.ClickTrack(48000, 120, 3).render(len(out))
+    assert out == whole and max(out[:1440]) > max(out[24000:25440])   # accent on the first beat
+    assert all(v == 0 for v in out[2000:24000]) and track.beat_at(30000) == (1, 24000)
+    track.set(bpm=60, beats=1)
+    track.render(48000 * 2)
+    assert track.clicks[-1][0] - track.clicks[-2][0] == 48000 and track.clicks[-1][1] == 0
+
+
+def test_diagnostic_report_hides_personal_data_and_fits_an_issue_link():
+    from urllib.parse import parse_qs, urlparse
+    from tankg import diag
+    diag.clear()
+    diag.log("Leyendo presets...")
+    diag.error(f"Traceback (most recent call last):\n  File \"{Path.home()}/x.py\"\nOSError: {Path.home()}/a.tgbank de ana@mail.com")
+    diag.error("clave sk-ant-api03-SECRETSECRET rechazada")
+    errs = diag.errors()
+    assert errs[0].endswith("OSError: ~/a.tgbank de <correo>") and errs[1].endswith("clave <clave> rechazada")
+    assert len(diag.lines()) == 3 and diag.lines()[1].split(" ", 1)[1].startswith("Error: OSError")
+    text = diag.report({"version": "9.9", "platform": "Linux", "pedal": "conectada (USB)", "port": "Tank-G",
+                        "modified": 2, "errors": diag.errors(), "log": diag.lines()})
+    assert text.startswith("Tank-G Control Center 9.9\nPlataforma: Linux\n") and "Presets sin guardar: 2" in text
+    assert "ana@" not in text and "SECRET" not in text and str(Path.home()) not in text
+    query = parse_qs(urlparse(diag.issue_url(text)).query)
+    assert query["title"] == ["Problema: "] and text.strip() in query["body"][0]
+    for _ in range(300):
+        diag.log("x" * 100)
+    assert len(diag.lines()) == diag.MAX_LOG
+    assert len(diag.issue_url(diag.report({"log": diag.lines()}))) < 8000
+    diag.clear()
+
+
+def test_demo_pedal_answers_like_the_real_one():
+    from tankg import artists, demo
+    bank, presets, banks = demo.demo_bank()
+    assert all(name in {b.name for b in artists.BANKS} for name in demo.DEMO_BANKS)
+    assert len(presets) == 36 and banks[1] == "Metallica"
+    pedal = demo.SimulatedPedal(bank.to_bytes())
+    dev = TankG(pedal)
+    assert dev.read_bank().to_bytes() == bank.to_bytes()
+    target = bank.copy()
+    target.presets[5] = bank.presets[0].copy()
+    after = dev.write_presets(target, [5])   # write + ACK + commit + read-back verification
+    assert after.presets[5] == bank.presets[0] and bytes(pedal.mem) == target.to_bytes()
+    dev.select_preset(5)

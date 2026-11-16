@@ -4,6 +4,7 @@ theme.QSS through objectNames only."""
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -14,11 +15,11 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame, QGraphicsOpacityEffect,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
-    QSizePolicy, QStackedWidget, QStyle, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout,
-    QWidget,
+    QSizePolicy, QSpinBox, QStackedWidget, QStyle, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QToolBar, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
-from . import ai, artists, chatapps, device, library, menu, pack, setlist
+from . import ai, artists, chatapps, device, diag, library, menu, pack, setlist, tempo, tuner
 from .model import AMP_MODELS, CAB_MODELS, FIELD_BY_KEY, FIELDS, OFF_COLOR, REC_LEN, SLOTS, Bank, slot_name, zone_of
 from .theme import ACCENT_HOVER, BORDER_2, ERROR, FIELD, OK, SURFACE_2, TEAL, TEXT, TEXT_DIM, WARN
 
@@ -2358,3 +2359,545 @@ class AIDialog(StyledDialog):
         task.signals.done.connect(lambda r: (_PENDING.discard(task), self.isVisible() and self._done(r)))
         task.signals.failed.connect(lambda m: (_PENDING.discard(task), self.isVisible() and self._failed(m)))
         QThreadPool.globalInstance().start(task)
+
+
+class TunerMeter(QWidget):
+    """The −50…+50 cents bar of the tuner: ticks every 10 cents, the in-tune zone and a needle."""
+
+    def __init__(self):
+        super().__init__()
+        self.cents: float | None = None
+        self.ok = False
+        self.setMinimumHeight(64)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def show_cents(self, cents: float | None, ok: bool = False) -> None:
+        self.cents, self.ok = cents, ok
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setPen(QColor(BORDER_2))
+        p.setBrush(QColor(SURFACE_2))
+        p.drawRoundedRect(r, 10, 10)
+        x = lambda c: r.left() + r.width() * (0.5 + c / 100)  # noqa: E731
+        zone = QColor(OK)
+        zone.setAlpha(30)
+        p.fillRect(QRectF(x(-tuner.IN_TUNE), r.top() + 1, x(tuner.IN_TUNE) - x(-tuner.IN_TUNE), r.height() - 2), zone)
+        p.setPen(QColor(BORDER_2))
+        for c in range(-40, 50, 10):
+            p.drawLine(int(x(c)), int(r.bottom() - (18 if c % 50 == 0 else 10)), int(x(c)), int(r.bottom() - 2))
+        p.setPen(QColor(TEXT))
+        p.drawLine(int(x(0)), int(r.top() + 2), int(x(0)), int(r.bottom() - 2))
+        if self.cents is not None:
+            c = max(-50.0, min(50.0, self.cents))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(OK if self.ok else WARN))
+            p.drawRoundedRect(QRectF(x(c) - 4, r.top() + 6, 8, r.height() - 12), 4, 4)
+        p.end()
+
+
+class TunerDialog(StyledDialog):
+    """Chromatic tuner (APK: tuner sheet). Listens to an audio input only while it is open: the
+    computer's microphone, or the Tank-G itself, which is also a USB sound card. Shows the note, how
+    many cents it is off and the nearest guitar string (tankg/tuner.py). Nothing is recorded or sent."""
+
+    def __init__(self, main):
+        super().__init__(main, "Afinador", "Toca una cuerda al aire cerca del micrófono, o elige la Tank-G como entrada "
+                         "si está conectada por USB (también es una tarjeta de sonido).", 640, 700)
+        self.source = None      # QAudioSource while listening
+        self.io = None
+        self.rate = 48000
+        self.sample_format = None
+        self.channels = 1
+        self._rest = b""
+        self.samples: list[float] = []
+        self.fresh = False
+        self.last: list[float] = []
+        self.miss = 0
+        self.devices: list = []
+        settings = library.Settings().tuner
+        self.a4 = int(settings.get("a4", 440)) if str(settings.get("a4", "")).isdigit() else 440
+        self.a4 = min(tuner.A4_RANGE[1], max(tuner.A4_RANGE[0], self.a4))
+        saved = settings.get("tuning", 0)
+        self.tuning = saved if isinstance(saved, int) and 0 <= saved < len(tuner.TUNINGS) else 0
+
+        note_row = QHBoxLayout()
+        note_row.addStretch()
+        self.note = QLabel("–")
+        self.note.setObjectName("tunerNote")
+        self.octave = QLabel("")
+        self.octave.setObjectName("tunerOctave")
+        note_row.addWidget(self.note, 0, Qt.AlignBottom)
+        note_row.addWidget(self.octave, 0, Qt.AlignBottom)
+        note_row.addStretch()
+        self.body.addLayout(note_row)
+        self.state = QLabel(tuner.WAITING)
+        self.state.setObjectName("tunerState")
+        self.state.setAlignment(Qt.AlignCenter)
+        self.body.addWidget(self.state)
+        self.meter = TunerMeter()
+        self.body.addWidget(self.meter)
+        scale = QHBoxLayout()
+        for i, text in enumerate(("♭ −50", "−25", "0", "+25", "+50 ♯")):
+            lab = QLabel(text)
+            lab.setObjectName("hint")
+            lab.setAlignment(Qt.AlignLeft if i == 0 else Qt.AlignRight if i == 4 else Qt.AlignCenter)
+            scale.addWidget(lab, 1)
+        self.body.addLayout(scale)
+        self.strings_row = QHBoxLayout()
+        self.strings_row.setSpacing(6)
+        self.strings: list[QLabel] = []
+        self.body.addLayout(self.strings_row)
+        self.info = QLabel("— Hz")
+        self.info.setObjectName("hint")
+        self.info.setAlignment(Qt.AlignCenter)
+        self.body.addWidget(self.info)
+        _, lay = self.card("", "Afinación y entrada de audio")
+        self.tuning_box = QComboBox()
+        self.tuning_box.addItems([name for name, _ in tuner.TUNINGS])
+        self.tuning_box.setCurrentIndex(self.tuning)
+        self.tuning_box.currentIndexChanged.connect(self._tuning_changed)
+        lay.addWidget(self.tuning_box)
+        row = QHBoxLayout()
+        self.input = QComboBox()
+        self.input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.input.currentIndexChanged.connect(self._input_changed)
+        row.addWidget(self.input, 1)
+        row.addWidget(QLabel("La (A4)"))
+        self.a4_box = QSpinBox()
+        self.a4_box.setRange(*tuner.A4_RANGE)
+        self.a4_box.setSuffix(" Hz")
+        self.a4_box.setValue(self.a4)
+        self.a4_box.valueChanged.connect(self._a4_changed)
+        row.addWidget(self.a4_box)
+        lay.addLayout(row)
+        self.message = QLabel(tuner.PRIVACY)
+        self.message.setObjectName("hint")
+        self.message.setWordWrap(True)
+        lay.addWidget(self.message)
+        self.body.addStretch()
+        self.button("Cerrar", self.accept, "primary")
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self._build_strings()
+        self._fill_inputs()
+        self._start()
+
+    def _build_strings(self) -> None:
+        """One tile per string of the chosen tuning; none in chromatic mode."""
+        for lab in self.strings:
+            lab.deleteLater()
+        self.strings = []
+        for midi in tuner.TUNINGS[self.tuning][1]:
+            lab = QLabel(tuner.note_name(midi))
+            lab.setObjectName("tunerString")
+            lab.setAlignment(Qt.AlignCenter)
+            self.strings_row.addWidget(lab, 1)
+            self.strings.append(lab)
+
+    def _tuning_changed(self, index: int) -> None:
+        self.tuning = index
+        library.Settings().set_tuner(tuning=index)
+        self._build_strings()
+        self._clear()
+
+    # audio input ---------------------------------------------------------------------
+
+    def _fill_inputs(self) -> None:
+        try:
+            from PySide6.QtMultimedia import QMediaDevices
+        except ImportError:
+            return
+        self.devices = list(QMediaDevices.audioInputs())
+        saved = library.Settings().tuner.get("input", "")
+        default = QMediaDevices.defaultAudioInput().description()
+        names = [d.description() for d in self.devices]
+        self.input.blockSignals(True)
+        self.input.clear()
+        self.input.addItems(names)
+        self.input.setCurrentIndex(names.index(saved) if saved in names else names.index(default) if default in names else 0)
+        self.input.blockSignals(False)
+
+    def _start(self) -> None:
+        self._stop()
+        try:
+            from PySide6.QtMultimedia import QAudioFormat, QAudioSource
+        except ImportError as e:
+            diag.error(f"Afinador: {e}")
+            self.message.setText("Este equipo no tiene el módulo de audio de Qt (Qt Multimedia): el afinador no puede escuchar.")
+            return
+        if not self.devices or self.input.currentIndex() < 0:
+            self.message.setText("No se encontró ningún micrófono ni entrada de audio. Conecta uno (o la Tank-G por USB) "
+                                 "y vuelve a abrir el afinador.")
+            return
+        dev = self.devices[self.input.currentIndex()]
+        fmt = QAudioFormat()
+        fmt.setSampleRate(48000)
+        fmt.setChannelCount(1)
+        fmt.setSampleFormat(QAudioFormat.SampleFormat.Float)
+        if not dev.isFormatSupported(fmt):
+            fmt = dev.preferredFormat()
+        self.rate, self.channels, self.sample_format = fmt.sampleRate(), max(1, fmt.channelCount()), fmt.sampleFormat()
+        self.source = QAudioSource(dev, fmt, self)
+        self.io = self.source.start()
+        error = self.source.error()   # QAudio.Error before Qt 6.7, QtAudio.Error after: compare by name
+        if self.io is None or getattr(error, "name", "NoError") != "NoError":
+            diag.error(f"Afinador: no se pudo abrir «{dev.description()}» ({getattr(error, 'name', error)})")
+            self.message.setText(f"No se pudo usar «{dev.description()}». Prueba otra entrada, o revisa que el sistema "
+                                 "permita a esta app usar el micrófono.")
+            self._stop()
+            return
+        self.io.readyRead.connect(self._read)
+        self.timer.start(100)
+        self.message.setText(tuner.PRIVACY)
+        diag.log(f"Afinador abierto ({self.rate} Hz)")
+
+    def _stop(self) -> None:
+        self.timer.stop()
+        if self.source is not None:
+            self.source.stop()
+            self.source.deleteLater()
+        self.source = self.io = None
+        self._rest = b""
+        self.samples = []
+
+    def _read(self) -> None:
+        from PySide6.QtMultimedia import QAudioFormat
+        if self.io is None:
+            return
+        SF = QAudioFormat.SampleFormat
+        code, scale, offset = {SF.Float: ("f", 1.0, 0), SF.Int16: ("h", 1 / 32768, 0), SF.Int32: ("i", 1 / 2147483648, 0),
+                               SF.UInt8: ("B", 1 / 128, 128)}.get(self.sample_format, (None, 0, 0))
+        if code is None:
+            return
+        data = self._rest + bytes(self.io.readAll().data())
+        frame = {"f": 4, "h": 2, "i": 4, "B": 1}[code] * self.channels
+        usable = len(data) - len(data) % frame
+        self._rest = data[usable:]
+        if not usable:
+            return
+        values = memoryview(data[:usable]).cast(code)[::self.channels]
+        self.samples.extend((v - offset) * scale for v in values)
+        del self.samples[:-tuner.FRAME]
+        self.fresh = True
+
+    def _tick(self) -> None:
+        if not self.fresh or len(self.samples) < tuner.FRAME:
+            return
+        self.fresh = False
+        block = self.samples[-tuner.FRAME:]
+        self._show(tuner.detect(block, self.rate), tuner.level(block))
+
+    # display (same as tunerShow in app.js) ---------------------------------------------
+
+    def _clear(self) -> None:
+        self.last, self.miss = [], 0
+        self.note.setText("–")
+        self.octave.setText("")
+        self._set_state(tuner.WAITING, "")
+        self.meter.show_cents(None)
+        for lab in self.strings:
+            self._flag(lab, False, False)
+
+    def _show(self, freq: float | None, level: float) -> None:
+        if freq is None:
+            self.miss += 1
+            if self.miss > 8:   # keep the last note for a moment
+                self._clear()
+            self.info.setText(f"— Hz · entrada {round(level)} dB")
+            return
+        self.miss = 0
+        self.last = (self.last + [freq])[-3:]
+        f = sorted(self.last)[len(self.last) // 2]   # median of the last three
+        r = tuner.reading(f, self.tuning, self.a4)
+        st, string = r["state"], r["string"]
+        self.note.setText(r["name"])
+        self.octave.setText(str(r["octave"]))
+        cents = round(r["cents"])
+        self._set_state(tuner.STATE_TEXT[st] + ("" if st == "ok" else f" ({'+' if cents > 0 else ''}{cents} cents)"), st)
+        self.meter.show_cents(r["cents"], st == "ok")
+        for i, lab in enumerate(self.strings):
+            self._flag(lab, i == string, i == string and st == "ok")
+        heard = f" · suena {r['heard']}" if string >= 0 else ""
+        self.info.setText(f"{f:.2f} Hz{heard} · entrada {round(level)} dB")
+
+    def _set_state(self, text: str, state: str) -> None:
+        self.state.setText(text)
+        self.state.setProperty("state", state)
+        self.state.style().unpolish(self.state)
+        self.state.style().polish(self.state)
+
+    @staticmethod
+    def _flag(lab: QLabel, on: bool, ok: bool) -> None:
+        if lab.property("on") == on and lab.property("ok") == ok:
+            return
+        lab.setProperty("on", on)
+        lab.setProperty("ok", ok)
+        lab.style().unpolish(lab)
+        lab.style().polish(lab)
+
+    def _input_changed(self, index: int) -> None:
+        if 0 <= index < len(self.devices):
+            library.Settings().set_tuner(input=self.devices[index].description())
+            self._clear()
+            self._start()
+
+    def _a4_changed(self, value: int) -> None:
+        self.a4 = value
+        library.Settings().set_tuner(a4=value)
+
+    def done(self, result: int) -> None:
+        self._stop()   # the microphone is released as soon as the window closes
+        super().done(result)
+
+
+class BeatLights(QWidget):
+    """One light per beat of the bar; the accented first beat has a yellow ring."""
+
+    def __init__(self):
+        super().__init__()
+        self.beats, self.lit = 4, -1
+        self.setMinimumHeight(40)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def show_beats(self, beats: int, lit: int = -1) -> None:
+        if (beats, lit) != (self.beats, self.lit):
+            self.beats, self.lit = beats, lit
+            self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        d, gap = 28, 14
+        x0 = (self.width() - (self.beats * d + (self.beats - 1) * gap)) / 2
+        for i in range(self.beats):
+            accent = i == 0 and self.beats > 1
+            on = i == self.lit
+            color = QColor(WARN if accent else ACCENT_HOVER)
+            p.setPen(QColor(color if accent or on else BORDER_2))
+            p.setBrush(color if on else QColor(SURFACE_2))
+            p.drawEllipse(QRectF(x0 + i * (d + gap), (self.height() - d) / 2, d, d))
+        p.end()
+
+
+class MetronomeDialog(StyledDialog):
+    """Metronome with tap tempo (APK: metronome sheet). The clicks are rendered sample by sample
+    (tempo.ClickTrack) into a short audio stream, so they stay steady whatever the UI is doing. Also
+    lists the delay times of the tempo, to set the pedal's DLY TIME by ear (the app does not write it)."""
+
+    BUFFER_S = 0.12   # audio queued ahead: the latency of a tempo change
+
+    def __init__(self, main):
+        super().__init__(main, "Metrónomo", "Pulsa «Tap» al ritmo de la canción (o la tecla T) para medir el tempo. "
+                         "Espacio inicia y para.", 600, 720)
+        saved = library.Settings().tempo
+        self.bpm = tempo.clamp(saved.get("bpm", tempo.DEFAULT_BPM)) if isinstance(saved.get("bpm"), (int, float)) \
+            else tempo.DEFAULT_BPM
+        meter = saved.get("meter", 0)
+        self.meter = meter if isinstance(meter, int) and 0 <= meter < len(tempo.METERS) else 0
+        self.taps: list[float] = []
+        self.sink = self.io = self.track = None
+        self._pending = b""
+        self.rate, self.channels, self.sample_format = 48000, 1, None
+
+        self.bpm_label = QLabel()
+        self.bpm_label.setObjectName("tempoBpm")
+        self.bpm_label.setAlignment(Qt.AlignCenter)
+        self.body.addWidget(self.bpm_label)
+        self.mark = QLabel()
+        self.mark.setObjectName("tempoMark")
+        self.mark.setAlignment(Qt.AlignCenter)
+        self.body.addWidget(self.mark)
+        self.lights = BeatLights()
+        self.body.addWidget(self.lights)
+        from PySide6.QtWidgets import QSlider
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(*tempo.BPM_RANGE)
+        self.slider.valueChanged.connect(lambda v: self.set_bpm(v))
+        self.body.addWidget(self.slider)
+        steps = QHBoxLayout()
+        for step in (-5, -1, 1, 5):
+            b = QPushButton(f"{step:+d}".replace("-", "−"))
+            b.setObjectName("secondary")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, s=step: self.set_bpm(self.bpm + s))
+            steps.addWidget(b)
+        self.body.addLayout(steps)
+        main_row = QHBoxLayout()
+        self.tap_btn = QPushButton("TAP")
+        self.tap_btn.setObjectName("secondary")
+        self.tap_btn.pressed.connect(self.tap)   # on press, not on release: tighter taps
+        self.play_btn = QPushButton()
+        self.play_btn.setObjectName("primary")
+        self.play_btn.clicked.connect(self.toggle)
+        for b in (self.tap_btn, self.play_btn):
+            b.setMinimumHeight(64)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)   # Space and T stay with the window
+            main_row.addWidget(b, 1)
+        self.body.addLayout(main_row)
+        meter_row = QHBoxLayout()
+        meter_row.addWidget(QLabel("Compás"))
+        self.meter_box = QComboBox()
+        self.meter_box.addItems([name for name, _ in tempo.METERS])
+        self.meter_box.setCurrentIndex(self.meter)
+        self.meter_box.currentIndexChanged.connect(self.set_meter)
+        self.meter_box.setFocusPolicy(Qt.NoFocus)
+        meter_row.addWidget(self.meter_box)
+        meter_row.addStretch()
+        self.body.addLayout(meter_row)
+        _, lay = self.card("", "Delay a tempo")
+        self.delay_grid = QGridLayout()
+        self.delay_labels: list[tuple[QLabel, QLabel]] = []
+        for i, (name, _) in enumerate(tempo.DELAY_NOTES):
+            a, b = QLabel(name), QLabel()
+            b.setAlignment(Qt.AlignRight)
+            self.delay_grid.addWidget(a, i, 0)
+            self.delay_grid.addWidget(b, i, 1)
+            self.delay_labels.append((a, b))
+        lay.addLayout(self.delay_grid)
+        self.message = QLabel(tempo.DELAY_HINT)
+        self.message.setObjectName("hint")
+        self.message.setWordWrap(True)
+        lay.addWidget(self.message)
+        self.body.addStretch()
+        self.button("Cerrar", self.accept)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._pump)
+        self._show()
+
+    # tempo -------------------------------------------------------------------------
+
+    def set_bpm(self, bpm: float) -> None:
+        self.bpm = tempo.clamp(bpm)
+        if self.track is not None:
+            self.track.set(bpm=self.bpm)
+        library.Settings().set_tempo(bpm=self.bpm)
+        self._show()
+
+    def set_meter(self, index: int) -> None:
+        self.meter = index
+        if self.track is not None:
+            self.track.set(beats=tempo.METERS[index][1])
+        library.Settings().set_tempo(meter=index)
+        self._show()
+
+    def tap(self, now: float | None = None) -> None:
+        self.taps = (self.taps + [time.monotonic() if now is None else now])[-12:]
+        bpm = tempo.tap(self.taps)
+        if bpm is not None:
+            self.set_bpm(bpm)
+
+    def _show(self) -> None:
+        self.bpm_label.setText(f"{self.bpm} BPM")
+        self.mark.setText(tempo.marking(self.bpm))
+        self.slider.blockSignals(True)
+        self.slider.setValue(self.bpm)
+        self.slider.blockSignals(False)
+        for (_, value), (_, ms) in zip(self.delay_labels, tempo.delay_times(self.bpm)):
+            value.setText(f"<b>{ms} ms</b>")
+        self.lights.show_beats(tempo.METERS[self.meter][1], self.lights.lit)
+        self.play_btn.setText("■  Parar" if self.sink is not None else "▶  Iniciar")
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API
+        key = event.key()
+        if key == Qt.Key_T:
+            self.tap()
+        elif key == Qt.Key_Space:
+            self.toggle()
+        elif key in (Qt.Key_Up, Qt.Key_Right, Qt.Key_Plus):
+            self.set_bpm(self.bpm + 1)
+        elif key in (Qt.Key_Down, Qt.Key_Left, Qt.Key_Minus):
+            self.set_bpm(self.bpm - 1)
+        else:
+            super().keyPressEvent(event)
+
+    # audio -------------------------------------------------------------------------
+
+    def toggle(self) -> None:
+        self.stop() if self.sink is not None else self.start()
+
+    def start(self) -> None:
+        self.stop()
+        try:
+            from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
+        except ImportError as e:
+            diag.error(f"Metrónomo: {e}")
+            self.message.setText("Este equipo no tiene el módulo de audio de Qt (Qt Multimedia): el metrónomo no puede sonar.")
+            return
+        dev = QMediaDevices.defaultAudioOutput()
+        if dev.isNull():
+            self.message.setText("No se encontró ninguna salida de audio.")
+            return
+        fmt = QAudioFormat()
+        fmt.setSampleRate(48000)
+        fmt.setChannelCount(1)
+        fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+        if not dev.isFormatSupported(fmt):
+            fmt = dev.preferredFormat()
+        self.rate, self.channels, self.sample_format = fmt.sampleRate(), max(1, fmt.channelCount()), fmt.sampleFormat()
+        self.track = tempo.ClickTrack(self.rate, self.bpm, tempo.METERS[self.meter][1])
+        self.sink = QAudioSink(dev, fmt, self)
+        self.sink.setBufferSize(int(self.rate * self.BUFFER_S) * fmt.bytesPerFrame())
+        self.io = self.sink.start()
+        error = self.sink.error()
+        if self.io is None or getattr(error, "name", "NoError") != "NoError":
+            diag.error(f"Metrónomo: no se pudo abrir la salida de audio ({getattr(error, 'name', error)})")
+            self.message.setText("No se pudo usar la salida de audio del equipo.")
+            self.stop()
+            return
+        self.message.setText(tempo.DELAY_HINT)
+        diag.log(f"Metrónomo: {self.bpm} BPM {tempo.METERS[self.meter][0]}")
+        self._pump()
+        self.timer.start(15)
+        self._show()
+
+    def stop(self) -> None:
+        self.timer.stop()
+        if self.sink is not None:
+            self.sink.stop()
+            self.sink.deleteLater()
+        self.sink = self.io = self.track = None
+        self._pending = b""
+        self.lights.show_beats(tempo.METERS[self.meter][1], -1)
+        self._show()
+
+    @staticmethod
+    def encode(samples: list[float], sample_format, channels: int) -> bytes:
+        """Samples (-1..1) in the output's format, the same value on every channel."""
+        from array import array
+        name = getattr(sample_format, "name", str(sample_format))
+        clip = [max(-1.0, min(1.0, v)) for v in samples]
+        if name == "Float":
+            values = array("f", clip)
+        elif name == "Int32":
+            values = array("i", (int(v * 2147483647) for v in clip))
+        elif name == "UInt8":
+            values = array("B", (int(v * 127 + 128) for v in clip))
+        else:
+            values = array("h", (int(v * 32767) for v in clip))
+        if channels > 1:
+            values = array(values.typecode, (v for v in values for _ in range(channels)))
+        return values.tobytes()
+
+    def _pump(self) -> None:
+        if self.sink is None or self.io is None:
+            return
+        frame = {"Float": 4, "Int32": 4, "UInt8": 1}.get(getattr(self.sample_format, "name", ""), 2) * self.channels
+        free = self.sink.bytesFree() - len(self._pending)
+        if free >= frame:
+            self._pending += self.encode(self.track.render(free // frame), self.sample_format, self.channels)
+        if self._pending:
+            written = self.io.write(self._pending)
+            self._pending = self._pending[max(0, written):]
+        played = int(self.sink.processedUSecs() * self.rate / 1_000_000)
+        beat = self.track.beat_at(played)
+        lit = beat[0] if beat and played - beat[1] < self.rate * 0.12 else -1
+        self.lights.show_beats(tempo.METERS[self.meter][1], lit)
+
+    def done(self, result: int) -> None:
+        self.stop()   # the metronome stops with its window
+        super().done(result)

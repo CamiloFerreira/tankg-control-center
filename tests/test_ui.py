@@ -147,3 +147,66 @@ def test_ui_cloud_reads_desktop_documents(tmp_path):
     r = subprocess.run(["node", str(ROOT / "tests/ui/cloud.test.mjs"), str(f)], capture_output=True, text=True,
                        encoding="utf-8", timeout=60)
     assert r.returncode == 0, r.stderr + r.stdout
+
+
+def _tone(freq, rate, n, harmonics=(1, 0.5, 0.3, 0.2), amp=0.3):
+    import math
+    return [amp * sum(a * math.sin(2 * math.pi * freq * (k + 1) * i / rate + k) for k, a in enumerate(harmonics)) / 2
+            for i in range(n)]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_ui_tuner_diag_and_demo_match_python(tmp_path):
+    """Same tuner readings, diagnostic report/issue link and demo pedal in the APK as on the desktop."""
+    import json
+    import random
+    from tankg import demo, diag, tuner
+    random.seed(7)
+    blocks = [("E2", 82.41, 48000, 440), ("A2", 110.0, 44100, 440), ("D3 bajo", 146.0, 48000, 440),
+              ("G3", 196.0, 44100, 442), ("B3 alto", 248.3, 48000, 440), ("E4", 329.63, 48000, 440),
+              ("A4", 440.0, 44100, 432)]
+    cases = []
+    for label, freq, rate, a4 in blocks:
+        cases.append({"label": label, "rate": rate, "a4": a4, "samples": _tone(freq, rate, tuner.FRAME)})
+    cases.append({"label": "silencio", "rate": 48000, "a4": 440, "samples": [0.0005] * tuner.FRAME})
+    cases.append({"label": "ruido", "rate": 48000, "a4": 440, "samples": [random.uniform(-0.3, 0.3) for _ in range(tuner.FRAME)]})
+    for c in cases:
+        f = tuner.detect(c["samples"], c["rate"])
+        c["freq"] = f
+        c["level"] = tuner.level(c["samples"])
+        if f is not None:
+            n = tuner.note(f, c["a4"])
+            c.update(note=f"{n['name']}{n['octave']}", cents=n["cents"], state=tuner.state(n["cents"]),
+                     readings=[tuner.reading(f, t, c["a4"]) for t in range(len(tuner.TUNINGS))])
+    assert [c["freq"] is None for c in cases] == [False] * len(blocks) + [True, True]
+    assert [c["note"] for c in cases[:len(blocks)]] == ["E2", "A2", "D3", "G3", "B3", "E4", "A4"]
+    assert [c["state"] for c in cases[:len(blocks)]] == ["ok", "ok", "low", "low", "high", "ok", "high"]
+
+    scrub = ["Error de juan.perez+x@mail.example.com al leer", "clave sk-ant-api03-ABCDEFGHIJ inválida",
+             "Traceback (most recent call last):\n  File \"x.py\", line 1\nDeviceError: sin respuesta", "", "  \n  línea 1\nlínea 2"]
+    long_log = [f"12:00:{i % 60:02d} Leyendo presets ({i})" for i in range(150)]
+    infos = [{"version": "1.12.0", "platform": "Linux 6.8 · Python 3.12 · Qt 6.8", "pedal": "conectada (USB)",
+              "port": "Tank-G MIDI 1", "demo": False, "modified": 3, "cloud": True, "backups": 12,
+              "errors": ["12:01:02 DeviceError: sin respuesta"], "log": ["12:00:00 Inicio", "12:01:02 Error: DeviceError: sin respuesta"]},
+             {"version": "1.12.0", "platform": "Android 14 · WebView 130", "pedal": "desconectada", "port": "",
+              "demo": True, "modified": 0, "cloud": False, "backups": 0, "errors": [], "log": []},
+             {"version": "1.12.0", "platform": "Windows 11", "pedal": "conectada (Bluetooth)", "port": "TANK-Gv2_BLE",
+              "errors": [], "log": long_log}]
+    reports = [{"info": i, "text": diag.report(i), "url": diag.issue_url(diag.report(i))} for i in infos]
+    assert "%0A%E2%80%A6" in reports[2]["url"] and len(reports[2]["url"]) < 8000   # long report cut to fit a link
+    golden = {"tuner": cases, "scrub": [{"in": s, "out": diag.one_line(diag.scrub(s))} for s in scrub],
+              "reports": reports}
+    bank, _, _ = demo.demo_bank()
+    from tankg import tempo
+    taps = [[0, 0.5, 1.0, 1.5], [0, 0.5, 5, 5.4, 5.8], [1], [0, 0.0001], [0, 3], [i * 0.37 for i in range(12)],
+            [0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]]
+    golden["tempo"] = {"taps": [{"times": t, "bpm": tempo.tap(t)} for t in taps],
+                       "bpms": [{"bpm": b, "marking": tempo.marking(b), "delays": tempo.delay_times(b),
+                                 "clamped": tempo.clamp(b + 0.4)} for b in (30, 59, 60, 87.5, 120, 133, 175, 199, 200, 300)]}
+    assert [c["bpm"] for c in golden["tempo"]["taps"]] == [120, 150, None, 300, None, 162, 240]
+    golden["demo"] = {"banks": demo.DEMO_BANKS, "presets": [p.to_bytes().hex() for p in bank.presets]}
+    gfile = tmp_path / "tools.json"
+    gfile.write_text(json.dumps(golden, ensure_ascii=False), encoding="utf-8")
+    r = subprocess.run(["node", str(ROOT / "tests/ui/tools.test.mjs"), str(gfile)], capture_output=True, text=True,
+                       encoding="utf-8", timeout=60)
+    assert r.returncode == 0, r.stderr + r.stdout

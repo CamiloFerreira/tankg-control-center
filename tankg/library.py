@@ -366,6 +366,26 @@ class Settings:
         self.save()
 
     @property
+    def tuner(self) -> dict:
+        """{"a4": reference in Hz, "input": description of the chosen audio input} (dialogs.TunerDialog)."""
+        value = self.data.get("tuner")
+        return value if isinstance(value, dict) else {}
+
+    def set_tuner(self, **values) -> None:
+        self.data["tuner"] = {**self.tuner, **values}
+        self.save()
+
+    @property
+    def tempo(self) -> dict:
+        """{"bpm", "meter": index in tempo.METERS} (dialogs.MetronomeDialog)."""
+        value = self.data.get("tempo")
+        return value if isinstance(value, dict) else {}
+
+    def set_tempo(self, **values) -> None:
+        self.data["tempo"] = {**self.tempo, **values}
+        self.save()
+
+    @property
     def factory_set(self) -> str:
         """Factory set last restored on the pedal (default: as it comes out of the box); the editor's
         factory presets follow it."""
