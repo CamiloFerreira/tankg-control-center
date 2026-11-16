@@ -47,7 +47,7 @@ Priority: optional
 Architecture: amd64
 Installed-Size: $SIZE
 Depends: libc6 (>= 2.35), libegl1, libgl1, libxkbcommon0, libfontconfig1
-Recommends: bluez
+Recommends: bluez, libpulse0
 Maintainer: Camilo Ferreira <camiloferrei9@gmail.com>
 Homepage: https://camiloferreira.github.io/tankg-control-center/
 Description: Gestor de presets para la pedalera M-VAVE Tank-G

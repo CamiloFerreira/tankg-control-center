@@ -580,7 +580,7 @@ def test_tuner_dialog_shows_the_note_of_the_samples(env, monkeypatch):
     assert d.note.text() == "–" and d.meter.cents is None and d.state.text() == tuner.WAITING
     d.a4_box.setValue(442)
     assert library.Settings().tuner["a4"] == 442 and d.a4 == 442
-    QtMultimedia = pytest.importorskip("PySide6.QtMultimedia")
+    QtMultimedia = pytest.importorskip("PySide6.QtMultimedia", exc_type=ImportError)   # CI without libpulse
 
     class FakeInput:
         def readAll(self):
@@ -607,7 +607,7 @@ def test_metronome_dialog_tap_meter_and_click_stream(env, monkeypatch):
     assert d.lights.beats == 3 and library.Settings().tempo == {"bpm": 120, "meter": 1}
     d.set_bpm(1000)
     assert d.bpm == tempo.BPM_RANGE[1] and d.slider.value() == tempo.BPM_RANGE[1]
-    QtMultimedia = pytest.importorskip("PySide6.QtMultimedia")
+    QtMultimedia = pytest.importorskip("PySide6.QtMultimedia", exc_type=ImportError)   # CI without libpulse
     SF = QtMultimedia.QAudioFormat.SampleFormat
     data = dialogs.MetronomeDialog.encode([0.5, -2.0], SF.Int16, 2)
     import struct
